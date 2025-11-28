@@ -1,7 +1,7 @@
 # 伊卡洛斯 (Icarus)
 
 <p align="center">
-  <img src="Icarus-icon.png" width="128" height="128" alt="Icarus Logo">
+  <img src="Icarus.png" width="128" height="128" alt="Icarus Logo">
 </p>
 
 <p align="center">
