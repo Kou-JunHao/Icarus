@@ -7,3 +7,4 @@ export 'schedule_screen.dart';
 export 'grades_screen.dart';
 export 'profile_screen.dart';
 export 'main_shell.dart';
+export 'update_dialog.dart';

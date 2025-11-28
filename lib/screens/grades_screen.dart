@@ -625,6 +625,7 @@ class _GradesScreenState extends State<GradesScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: colorScheme.surface,

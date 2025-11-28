@@ -129,6 +129,115 @@ class _ScheduleScreenState extends State<ScheduleScreen>
             customTimetable ?? AuthStorage.generateTimetable(settings);
       });
     }
+
+    // 检查是否设置了学期开始日期
+    _checkSemesterStartDate();
+  }
+
+  /// 检查学期开始日期是否已设置，未设置则提示用户
+  Future<void> _checkSemesterStartDate() async {
+    final startDate = await AuthStorage.getSemesterStartDate();
+    if (startDate == null && mounted) {
+      // 延迟显示提示，避免页面加载时立即弹出
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) {
+        _showSemesterStartDatePrompt();
+      }
+    }
+  }
+
+  /// 显示学期开始日期设置提示
+  void _showSemesterStartDatePrompt() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      isDismissible: true,
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 拖拽指示器
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colorScheme.outline.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+            // 图标
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.calendar_month_rounded,
+                size: 32,
+                color: colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            // 标题
+            Text(
+              '设置学期开始日期',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 说明
+            Text(
+              '设置学期开始日期后，可以自动计算当前周次，让课程表更加准确。',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            // 按钮
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text('稍后设置'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showScheduleSettings();
+                    },
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text('立即设置'),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: MediaQuery.of(context).padding.bottom),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 根据当前设置重新生成时间表
@@ -153,6 +262,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Container(
           height: MediaQuery.of(context).size.height * 0.85,
@@ -664,6 +774,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       isScrollControlled: true,
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.5,
@@ -1589,6 +1700,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: colorScheme.surface,
@@ -1788,6 +1900,7 @@ class _ScheduleScreenState extends State<ScheduleScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Container(
           height: MediaQuery.of(context).size.height * 0.9,
@@ -1884,6 +1997,22 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
+                    // 学期设置区（移到最上方）
+                    _buildSettingsSection(
+                      theme,
+                      colorScheme,
+                      '学期设置',
+                      Icons.calendar_month_rounded,
+                      [
+                        _buildSemesterStartDateItem(
+                          context,
+                          theme,
+                          colorScheme,
+                          setModalState,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
                     // 时间设置区
                     _buildSettingsSection(
                       theme,
@@ -2058,22 +2187,6 @@ class _ScheduleScreenState extends State<ScheduleScreen>
                             });
                           },
                           suffix: '节课',
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    // 学期设置区
-                    _buildSettingsSection(
-                      theme,
-                      colorScheme,
-                      '学期设置',
-                      Icons.calendar_month_rounded,
-                      [
-                        _buildSemesterStartDateItem(
-                          context,
-                          theme,
-                          colorScheme,
-                          setModalState,
                         ),
                       ],
                     ),

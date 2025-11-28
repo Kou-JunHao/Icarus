@@ -237,7 +237,7 @@ class _LoginScreenState extends State<LoginScreen>
                     children: [
                       // Logo 和标题
                       _buildHeader(colorScheme),
-                      const SizedBox(height: 48),
+                      const SizedBox(height: 32),
                       // 登录表单卡片
                       _buildLoginCard(theme, colorScheme, size),
                     ],
@@ -252,60 +252,63 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildHeader(ColorScheme colorScheme) {
-    return Column(
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Logo - 使用渐变背景和现代化设计
+        // Logo - 使用应用图标前景
         Hero(
           tag: 'app_logo',
           child: Container(
-            padding: const EdgeInsets.all(24),
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [colorScheme.primary, colorScheme.tertiary],
               ),
-              borderRadius: BorderRadius.circular(32),
+              borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
-                  color: colorScheme.primary.withValues(alpha: 0.3),
-                  blurRadius: 24,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 8),
+                  color: colorScheme.primary.withValues(alpha: 0.25),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 4),
                 ),
               ],
             ),
-            child: const Icon(
-              Icons.school_rounded,
-              size: 52,
-              color: Colors.white,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Image.asset(
+                'assets/app_icon_foreground.png',
+                fit: BoxFit.cover,
+              ),
             ),
           ),
         ),
-        const SizedBox(height: 28),
-        // 应用名
-        Text(
-          '伊卡洛斯',
-          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: colorScheme.onSurface,
-            letterSpacing: -0.5,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          decoration: BoxDecoration(
-            color: colorScheme.primaryContainer.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            '校园服务聚合平台',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: colorScheme.primary,
-              fontWeight: FontWeight.w500,
+        const SizedBox(width: 16),
+        // 应用名和副标题
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '伊卡洛斯',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface,
+                letterSpacing: -0.5,
+              ),
             ),
-          ),
+            const SizedBox(height: 4),
+            Text(
+              '校园服务聚合平台',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -318,11 +321,11 @@ class _LoginScreenState extends State<LoginScreen>
         elevation: 0,
         color: colorScheme.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.1)),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(20),
           child: Form(
             key: _formKey,
             child: Column(
@@ -331,18 +334,18 @@ class _LoginScreenState extends State<LoginScreen>
                 // 标题
                 Text(
                   '登录教务系统',
-                  style: theme.textTheme.titleLarge?.copyWith(
+                  style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Text(
                   '使用学号和教务系统密码登录',
-                  style: theme.textTheme.bodyMedium?.copyWith(
+                  style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
                 // 学号输入框
                 TextFormField(
@@ -350,7 +353,8 @@ class _LoginScreenState extends State<LoginScreen>
                   decoration: InputDecoration(
                     labelText: '学号',
                     hintText: '请输入学号',
-                    prefixIcon: const Icon(Icons.person_outline),
+                    prefixIcon: const Icon(Icons.person_outline, size: 20),
+                    isDense: true,
                     filled: true,
                     fillColor: colorScheme.surfaceContainerHighest.withValues(
                       alpha: 0.5,
@@ -365,7 +369,7 @@ class _LoginScreenState extends State<LoginScreen>
                     return null;
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
                 // 密码输入框
                 TextFormField(
@@ -373,12 +377,14 @@ class _LoginScreenState extends State<LoginScreen>
                   decoration: InputDecoration(
                     labelText: '密码',
                     hintText: '请输入密码',
-                    prefixIcon: const Icon(Icons.lock_outline),
+                    prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                    isDense: true,
                     suffixIcon: IconButton(
                       icon: Icon(
                         _obscurePassword
                             ? Icons.visibility_outlined
                             : Icons.visibility_off_outlined,
+                        size: 20,
                       ),
                       onPressed: () {
                         setState(() {
@@ -408,7 +414,7 @@ class _LoginScreenState extends State<LoginScreen>
 
                 // 验证码输入（仅在需要时显示）
                 if (_showManualCaptcha) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
@@ -417,7 +423,11 @@ class _LoginScreenState extends State<LoginScreen>
                           decoration: InputDecoration(
                             labelText: '验证码',
                             hintText: '请输入验证码',
-                            prefixIcon: const Icon(Icons.security_outlined),
+                            prefixIcon: const Icon(
+                              Icons.security_outlined,
+                              size: 20,
+                            ),
+                            isDense: true,
                             filled: true,
                             fillColor: colorScheme.surfaceContainerHighest
                                 .withValues(alpha: 0.5),
@@ -431,8 +441,8 @@ class _LoginScreenState extends State<LoginScreen>
                       GestureDetector(
                         onTap: _refreshCaptcha,
                         child: Container(
-                          height: 56,
-                          width: 100,
+                          height: 48,
+                          width: 96,
                           decoration: BoxDecoration(
                             color: colorScheme.surfaceContainerHighest,
                             borderRadius: BorderRadius.circular(12),
@@ -456,42 +466,55 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                 ],
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
                 // 记住密码
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _rememberPassword,
-                      onChanged: (value) {
-                        setState(() {
-                          _rememberPassword = value ?? true;
-                        });
-                      },
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
+                Transform.translate(
+                  offset: const Offset(-8, 0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: 32,
+                        width: 32,
+                        child: Checkbox(
+                          value: _rememberPassword,
+                          onChanged: (value) {
+                            setState(() {
+                              _rememberPassword = value ?? true;
+                            });
+                          },
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
                       ),
-                    ),
-                    Text(
-                      '记住密码',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
+                      Text(
+                        '记住密码',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
 
                 // 错误信息
                 if (_errorMessage != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: _errorMessage!.contains('正在')
                           ? colorScheme.primaryContainer.withValues(alpha: 0.5)
                           : colorScheme.errorContainer.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
                       children: [
@@ -499,7 +522,7 @@ class _LoginScreenState extends State<LoginScreen>
                           _errorMessage!.contains('正在')
                               ? Icons.info_outline
                               : Icons.error_outline,
-                          size: 20,
+                          size: 18,
                           color: _errorMessage!.contains('正在')
                               ? colorScheme.primary
                               : colorScheme.error,
@@ -520,13 +543,16 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                 ],
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
                 // 登录按钮
                 FilledButton(
                   onPressed: _isLoading
                       ? null
                       : (_showManualCaptcha ? _loginWithCaptcha : _login),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
                   child: _isLoading
                       ? SizedBox(
                           height: 20,
@@ -541,7 +567,7 @@ class _LoginScreenState extends State<LoginScreen>
 
                 // 返回自动登录
                 if (_showManualCaptcha) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   TextButton(
                     onPressed: () {
                       setState(() {
@@ -550,6 +576,9 @@ class _LoginScreenState extends State<LoginScreen>
                         _errorMessage = null;
                       });
                     },
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size.fromHeight(36),
+                    ),
                     child: const Text('返回自动登录'),
                   ),
                 ],

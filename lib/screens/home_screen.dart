@@ -10,6 +10,35 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/services.dart';
 import 'schedule_screen.dart' show CourseColors;
+import 'update_dialog.dart';
+
+/// 通知类型
+enum NotificationType {
+  update, // 版本更新
+  course, // 上课提醒
+  announcement, // 公告
+}
+
+/// 通知项
+class NotificationItem {
+  final NotificationType type;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color? color;
+  final VoidCallback? onTap;
+  final DateTime? time;
+
+  const NotificationItem({
+    required this.type,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    this.color,
+    this.onTap,
+    this.time,
+  });
+}
 
 /// 主页屏幕
 class HomeScreen extends StatefulWidget {
@@ -39,6 +68,10 @@ class _HomeScreenState extends State<HomeScreen>
   int _lastCourseCount = 0; // 用于检测课程数量变化
   bool _needsInitialScroll = true; // 标记是否需要初始滚动
 
+  // 更新相关
+  UpdateInfo? _updateInfo;
+  bool _isCheckingUpdate = false;
+
   // 使用 false 允许页面在不可见时释放内存
   @override
   bool get wantKeepAlive => false;
@@ -54,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen>
     super.initState();
     _checkCityAndLoadWeather();
     _loadTimetable();
+    _checkForUpdate();
   }
 
   @override
@@ -65,6 +99,120 @@ class _HomeScreenState extends State<HomeScreen>
     _weather = null;
     _sectionTimes.clear();
     super.dispose();
+  }
+
+  /// 获取所有通知列表
+  List<NotificationItem> _getNotifications() {
+    final notifications = <NotificationItem>[];
+
+    // 版本更新通知
+    if (_updateInfo != null) {
+      notifications.add(
+        NotificationItem(
+          type: NotificationType.update,
+          title: '发现新版本 v${_updateInfo!.version}',
+          subtitle: '点击查看更新内容',
+          icon: Icons.system_update_rounded,
+          color: Colors.blue,
+          onTap: _showUpdateDialog,
+        ),
+      );
+    }
+
+    // 上课提醒通知（检查即将开始的课程）
+    final upcomingCourse = _getUpcomingCourseNotification();
+    if (upcomingCourse != null) {
+      notifications.add(upcomingCourse);
+    }
+
+    return notifications;
+  }
+
+  /// 获取即将开始的课程通知
+  NotificationItem? _getUpcomingCourseNotification() {
+    final now = DateTime.now();
+    final weekday = now.weekday;
+    final schedule = widget.dataManager.schedule;
+    final currentWeek = widget.dataManager.currentWeek;
+
+    if (schedule == null) return null;
+
+    final todayCourses = schedule.getCoursesForDay(currentWeek, weekday);
+    if (todayCourses.isEmpty) return null;
+
+    for (final course in todayCourses) {
+      final startTimeStr = _getSectionTime(course.startSection, true);
+      if (startTimeStr == '--:--') continue;
+
+      final parts = startTimeStr.split(':');
+      final startTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        int.parse(parts[0]),
+        int.parse(parts[1]),
+      );
+
+      final diff = startTime.difference(now);
+      // 30分钟内即将开始的课程
+      if (diff.inMinutes > 0 && diff.inMinutes <= 30) {
+        return NotificationItem(
+          type: NotificationType.course,
+          title: '${course.name} 即将开始',
+          subtitle: '${diff.inMinutes}分钟后 · ${course.location ?? "未知地点"}',
+          icon: Icons.schedule_rounded,
+          color: Colors.orange,
+          time: startTime,
+        );
+      }
+    }
+
+    return null;
+  }
+
+  /// 检查应用更新
+  Future<void> _checkForUpdate() async {
+    if (_isCheckingUpdate) return;
+
+    setState(() {
+      _isCheckingUpdate = true;
+    });
+
+    try {
+      final updateService = UpdateService();
+      final updateInfo = await updateService.checkForUpdate();
+      if (mounted && updateInfo != null) {
+        setState(() {
+          _updateInfo = updateInfo;
+        });
+      }
+    } catch (e) {
+      debugPrint('检查更新失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCheckingUpdate = false;
+        });
+      }
+    }
+  }
+
+  /// 显示更新对话框
+  void _showUpdateDialog() {
+    if (_updateInfo == null) return;
+
+    UpdateDialog.show(
+      context,
+      updateInfo: _updateInfo!,
+      onSkip: () {
+        setState(() {
+          _updateInfo = null;
+        });
+      },
+      onDismiss: () {
+        // 用户关闭对话框但不跳过版本
+      },
+    );
   }
 
   /// 检查城市设置并加载天气
@@ -231,10 +379,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
-                      child: IconButton(
-                        icon: const Icon(Icons.notifications_outlined),
-                        onPressed: () {},
-                      ),
+                      child: _buildNotificationButton(colorScheme),
                     ),
                   ],
                 ),
@@ -292,6 +437,285 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         );
       },
+    );
+  }
+
+  /// 构建通知按钮（按钮样式，支持多种通知）
+  Widget _buildNotificationButton(ColorScheme colorScheme) {
+    final notifications = _getNotifications();
+    final hasNotifications = notifications.isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      child: Material(
+        color: hasNotifications
+            ? colorScheme.primaryContainer
+            : colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _showNotificationPanel(notifications),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(
+                      hasNotifications
+                          ? Icons.notifications_active_rounded
+                          : Icons.notifications_outlined,
+                      size: 20,
+                      color: hasNotifications
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                    // 通知数量徽章
+                    if (hasNotifications)
+                      Positioned(
+                        right: -6,
+                        top: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: colorScheme.error,
+                            shape: BoxShape.circle,
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            '${notifications.length}',
+                            style: TextStyle(
+                              color: colorScheme.onError,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                if (hasNotifications) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '通知',
+                    style: TextStyle(
+                      color: colorScheme.onPrimaryContainer,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 显示通知面板
+  void _showNotificationPanel(List<NotificationItem> notifications) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      builder: (context) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.6,
+        ),
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 拖拽指示器
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colorScheme.outlineVariant,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // 标题
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.notifications_rounded, color: colorScheme.primary),
+                  const SizedBox(width: 12),
+                  Text(
+                    '通知中心',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (notifications.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${notifications.length} 条',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // 通知列表
+            Flexible(
+              child: notifications.isEmpty
+                  ? _buildEmptyNotifications(theme, colorScheme)
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: notifications.length,
+                      separatorBuilder: (_, __) => Divider(
+                        height: 1,
+                        indent: 72,
+                        endIndent: 24,
+                        color: colorScheme.outlineVariant.withValues(
+                          alpha: 0.5,
+                        ),
+                      ),
+                      itemBuilder: (context, index) {
+                        final notification = notifications[index];
+                        return _buildNotificationTile(
+                          theme,
+                          colorScheme,
+                          notification,
+                        );
+                      },
+                    ),
+            ),
+            // 底部安全区域
+            SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建空通知状态
+  Widget _buildEmptyNotifications(ThemeData theme, ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.all(48),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.notifications_off_outlined,
+              size: 48,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '暂无通知',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '新消息会在这里显示',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.outline,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建通知项
+  Widget _buildNotificationTile(
+    ThemeData theme,
+    ColorScheme colorScheme,
+    NotificationItem notification,
+  ) {
+    final color = notification.color ?? colorScheme.primary;
+
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context); // 关闭面板
+        notification.onTap?.call();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 图标
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(notification.icon, size: 24, color: color),
+            ),
+            const SizedBox(width: 16),
+            // 内容
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    notification.title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    notification.subtitle,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // 箭头
+            if (notification.onTap != null)
+              Icon(
+                Icons.chevron_right_rounded,
+                color: colorScheme.onSurfaceVariant,
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -602,6 +1026,7 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: colorScheme.surface,
@@ -1054,6 +1479,7 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => _CitySelector(
         onCitySelected: (cityPinyin, cityName) async {
           // 保存城市设置
@@ -1728,6 +2154,7 @@ class _HomeScreenState extends State<HomeScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      showDragHandle: false,
       builder: (context) => Container(
         decoration: BoxDecoration(
           color: colorScheme.surface,
