@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -62,8 +63,29 @@ class UpdateService {
   static const String _owner = 'Kou-JunHao'; // 替换为实际的 GitHub 用户名
   static const String _repo = 'Icarus'; // 替换为实际的仓库名
 
-  // 当前应用版本 - 请与 pubspec.yaml 中的版本保持同步
-  static const String currentVersion = '0.9.0';
+  // 当前应用版本（从 package_info_plus 动态获取）
+  static String _currentVersion = '';
+  static String _currentBuildNumber = '';
+
+  /// 获取当前版本号
+  static String get currentVersion => _currentVersion;
+
+  /// 获取当前构建号
+  static String get currentBuildNumber => _currentBuildNumber;
+
+  /// 初始化版本信息（应在应用启动时调用）
+  static Future<void> initVersionInfo() async {
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      _currentVersion = packageInfo.version;
+      _currentBuildNumber = packageInfo.buildNumber;
+      debugPrint('应用版本: $_currentVersion+$_currentBuildNumber');
+    } catch (e) {
+      debugPrint('获取版本信息失败: $e');
+      _currentVersion = '未知';
+      _currentBuildNumber = '0';
+    }
+  }
 
   // 存储 key
   static const String _keySkippedVersion = 'update_skipped_version';

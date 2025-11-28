@@ -9,6 +9,9 @@ import 'screens/screens.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 初始化版本信息
+  await UpdateService.initVersionInfo();
+
   // 初始化主题服务
   await ThemeService().init();
 
