@@ -1,0 +1,563 @@
+/// 登录页面
+/// Material You Design 风格的现代化登录界面
+library;
+
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+
+import '../services/services.dart';
+
+/// 登录页面
+class LoginScreen extends StatefulWidget {
+  final VoidCallback onLoginSuccess;
+  final JwxtService jwxtService;
+
+  const LoginScreen({
+    super.key,
+    required this.onLoginSuccess,
+    required this.jwxtService,
+  });
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
+  final _formKey = GlobalKey<FormState>();
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _captchaController = TextEditingController();
+
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _rememberPassword = true;
+  String? _errorMessage;
+  Uint8List? _captchaImage;
+  bool _showManualCaptcha = false;
+
+  // 动画控制器
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    );
+
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.1), end: Offset.zero).animate(
+          CurvedAnimation(
+            parent: _animationController,
+            curve: Curves.easeOutCubic,
+          ),
+        );
+
+    _animationController.forward();
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final credentials = await AuthStorage.getCredentials();
+    if (credentials != null && mounted) {
+      setState(() {
+        _usernameController.text = credentials.username;
+        _passwordController.text = credentials.password;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _captchaController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await widget.jwxtService.autoLogin(
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
+        onProgress: (message) {
+          if (mounted) {
+            setState(() {
+              _errorMessage = message;
+            });
+          }
+        },
+      );
+
+      if (!mounted) return;
+
+      if (result is LoginSuccess) {
+        // 保存凭据
+        if (_rememberPassword) {
+          await AuthStorage.saveCredentials(
+            username: _usernameController.text.trim(),
+            password: _passwordController.text,
+          );
+        }
+        widget.onLoginSuccess();
+      } else if (result is LoginNeedCaptcha) {
+        setState(() {
+          _captchaImage = result.captchaImage;
+          _showManualCaptcha = true;
+          _errorMessage = '需要手动输入验证码';
+        });
+      } else if (result is LoginFailure) {
+        setState(() {
+          _errorMessage = result.message;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = '登录失败: $e';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loginWithCaptcha() async {
+    if (_captchaController.text.isEmpty) {
+      setState(() {
+        _errorMessage = '请输入验证码';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await widget.jwxtService.login(
+        username: _usernameController.text.trim(),
+        password: _passwordController.text,
+        captcha: _captchaController.text,
+      );
+
+      if (!mounted) return;
+
+      if (result is LoginSuccess) {
+        if (_rememberPassword) {
+          await AuthStorage.saveCredentials(
+            username: _usernameController.text.trim(),
+            password: _passwordController.text,
+          );
+        }
+        widget.onLoginSuccess();
+      } else if (result is LoginFailure) {
+        setState(() {
+          _errorMessage = result.message;
+        });
+        // 刷新验证码
+        _refreshCaptcha();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = '登录失败: $e';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshCaptcha() async {
+    final image = await widget.jwxtService.refreshCaptcha();
+    if (mounted && image != null) {
+      setState(() {
+        _captchaImage = image;
+        _captchaController.clear();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final size = MediaQuery.of(context).size;
+
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              colorScheme.primary.withValues(alpha: 0.08),
+              colorScheme.surface,
+              colorScheme.secondary.withValues(alpha: 0.05),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: SlideTransition(
+                  position: _slideAnimation,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Logo 和标题
+                      _buildHeader(colorScheme),
+                      const SizedBox(height: 48),
+                      // 登录表单卡片
+                      _buildLoginCard(theme, colorScheme, size),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(ColorScheme colorScheme) {
+    return Column(
+      children: [
+        // Logo - 使用渐变背景和现代化设计
+        Hero(
+          tag: 'app_logo',
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [colorScheme.primary, colorScheme.tertiary],
+              ),
+              borderRadius: BorderRadius.circular(32),
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.primary.withValues(alpha: 0.3),
+                  blurRadius: 24,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.school_rounded,
+              size: 52,
+              color: Colors.white,
+            ),
+          ),
+        ),
+        const SizedBox(height: 28),
+        // 应用名
+        Text(
+          '伊卡洛斯',
+          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: colorScheme.onSurface,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            '校园服务聚合平台',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: colorScheme.primary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoginCard(ThemeData theme, ColorScheme colorScheme, Size size) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 400),
+      child: Card(
+        elevation: 0,
+        color: colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+          side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.1)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 标题
+                Text(
+                  '登录教务系统',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '使用学号和教务系统密码登录',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // 学号输入框
+                TextFormField(
+                  controller: _usernameController,
+                  decoration: InputDecoration(
+                    labelText: '学号',
+                    hintText: '请输入学号',
+                    prefixIcon: const Icon(Icons.person_outline),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                  ),
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.next,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return '请输入学号';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // 密码输入框
+                TextFormField(
+                  controller: _passwordController,
+                  decoration: InputDecoration(
+                    labelText: '密码',
+                    hintText: '请输入密码',
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
+                    ),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                  ),
+                  obscureText: _obscurePassword,
+                  textInputAction: _showManualCaptcha
+                      ? TextInputAction.next
+                      : TextInputAction.done,
+                  onFieldSubmitted: (_) {
+                    if (!_showManualCaptcha) _login();
+                  },
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return '请输入密码';
+                    }
+                    return null;
+                  },
+                ),
+
+                // 验证码输入（仅在需要时显示）
+                if (_showManualCaptcha) ...[
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _captchaController,
+                          decoration: InputDecoration(
+                            labelText: '验证码',
+                            hintText: '请输入验证码',
+                            prefixIcon: const Icon(Icons.security_outlined),
+                            filled: true,
+                            fillColor: colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.5),
+                          ),
+                          textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) => _loginWithCaptcha(),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // 验证码图片
+                      GestureDetector(
+                        onTap: _refreshCaptcha,
+                        child: Container(
+                          height: 56,
+                          width: 100,
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: _captchaImage != null
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.memory(
+                                    _captchaImage!,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+
+                // 记住密码
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _rememberPassword,
+                      onChanged: (value) {
+                        setState(() {
+                          _rememberPassword = value ?? true;
+                        });
+                      },
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    Text(
+                      '记住密码',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+
+                // 错误信息
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _errorMessage!.contains('正在')
+                          ? colorScheme.primaryContainer.withValues(alpha: 0.5)
+                          : colorScheme.errorContainer.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _errorMessage!.contains('正在')
+                              ? Icons.info_outline
+                              : Icons.error_outline,
+                          size: 20,
+                          color: _errorMessage!.contains('正在')
+                              ? colorScheme.primary
+                              : colorScheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: _errorMessage!.contains('正在')
+                                  ? colorScheme.onPrimaryContainer
+                                  : colorScheme.error,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                // 登录按钮
+                FilledButton(
+                  onPressed: _isLoading
+                      ? null
+                      : (_showManualCaptcha ? _loginWithCaptcha : _login),
+                  child: _isLoading
+                      ? SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colorScheme.onPrimary,
+                          ),
+                        )
+                      : const Text('登录'),
+                ),
+
+                // 返回自动登录
+                if (_showManualCaptcha) ...[
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _showManualCaptcha = false;
+                        _captchaController.clear();
+                        _errorMessage = null;
+                      });
+                    },
+                    child: const Text('返回自动登录'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">伊卡洛斯</string>
+    <string name="widget_name">今日课程</string>
+    <string name="widget_description">在桌面显示今日课程安排</string>
+</resources>

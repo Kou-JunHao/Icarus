@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#4A90D9</color>
+    
+    <!-- 小组件文字颜色 - 亮色模式 -->
+    <color name="widget_text_primary">#1A1A1A</color>
+    <color name="widget_text_secondary">#666666</color>
+    <color name="widget_text_tertiary">#999999</color>
+    <color name="widget_text_hint">#AAAAAA</color>
+    <color name="widget_accent">#6750A4</color>
+    <color name="widget_divider">#E0E0E0</color>
+</resources>

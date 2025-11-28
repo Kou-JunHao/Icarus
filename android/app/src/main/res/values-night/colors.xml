@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小组件文字颜色 - 暗色模式 -->
+    <color name="widget_text_primary">#E6E1E5</color>
+    <color name="widget_text_secondary">#CAC4D0</color>
+    <color name="widget_text_tertiary">#938F99</color>
+    <color name="widget_text_hint">#79747E</color>
+    <color name="widget_accent">#D0BCFF</color>
+    <color name="widget_divider">#49454F</color>
+</resources>

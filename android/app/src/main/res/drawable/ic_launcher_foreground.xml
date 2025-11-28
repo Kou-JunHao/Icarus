@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- 自适应图标前景 - 108x108画布，安全区域为中心72x72 (18-90) -->
+    <!-- 将 icon_launcher 中的图标内容放大并居中 -->
+    
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="1.5"
+        android:scaleY="1.5">
+        
+        <!-- 这里放置原图标的矢量路径，缩放后填充72dp区域 -->
+        <!-- 占位圆形图标 - 如果原图是PNG，需要用mipmap方式 -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M36,36m-30,0a30,30 0,1 1,60 0a30,30 0,1 1,-60 0"/>
+    </group>
+</vector>
