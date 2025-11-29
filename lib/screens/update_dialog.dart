@@ -75,30 +75,40 @@ class _UpdateDialogState extends State<UpdateDialog> {
       _errorMessage = null;
     });
 
-    final filePath = await _updateService.downloadUpdate(
-      widget.updateInfo,
-      onProgress: (received, total) {
-        if (mounted) {
-          setState(() {
-            _downloadProgress = received / total;
-          });
-        }
-      },
-    );
+    try {
+      final filePath = await _updateService.downloadUpdate(
+        widget.updateInfo,
+        onProgress: (received, total) {
+          if (mounted) {
+            setState(() {
+              _downloadProgress = received / total;
+            });
+          }
+        },
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (filePath != null) {
-      setState(() {
-        _isDownloading = false;
-        _isDownloaded = true;
-        _downloadedFilePath = filePath;
-      });
-    } else {
-      setState(() {
-        _isDownloading = false;
-        _errorMessage = '下载失败，请重试';
-      });
+      if (filePath != null) {
+        setState(() {
+          _isDownloading = false;
+          _isDownloaded = true;
+          _downloadedFilePath = filePath;
+        });
+      } else {
+        setState(() {
+          _isDownloading = false;
+          _errorMessage = '下载失败，请检查网络连接后重试';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _errorMessage =
+              '下载出错: ${e.toString().length > 50 ? '${e.toString().substring(0, 50)}...' : e}';
+        });
+      }
     }
   }
 
@@ -532,6 +542,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
   }
 
   String _formatDate(DateTime date) {
-    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    // 将 UTC 时间转换为本地时间
+    final localDate = date.toLocal();
+    return '${localDate.year}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
   }
 }

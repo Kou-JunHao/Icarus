@@ -99,7 +99,7 @@ class UpdateService {
   factory UpdateService() => _instance ??= UpdateService._();
   UpdateService._();
 
-  // HTTP 客户端
+  // HTTP 客户端 - 用于 API 请求
   late final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 15),
@@ -107,6 +107,21 @@ class UpdateService {
       headers: {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'Icarus-App',
+      },
+    ),
+  );
+
+  // HTTP 客户端 - 用于下载文件（需要支持重定向和更长的超时）
+  late final Dio _downloadDio = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(minutes: 15),
+      followRedirects: true,
+      maxRedirects: 10,
+      headers: {
+        'User-Agent':
+            'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36',
+        'Accept': '*/*',
       },
     ),
   );
@@ -154,6 +169,14 @@ class UpdateService {
 
       final downloadUrl = apkAsset['browser_download_url'] as String? ?? '';
       final fileSize = apkAsset['size'] as int? ?? 0;
+
+      // 验证下载链接
+      if (downloadUrl.isEmpty) {
+        debugPrint('APK 下载链接为空');
+        return null;
+      }
+
+      debugPrint('找到 APK: $downloadUrl, 大小: $fileSize bytes');
 
       // 检查是否需要更新
       if (!_isNewerVersion(version, currentVersion)) {
@@ -223,27 +246,168 @@ class UpdateService {
       // 创建取消令牌
       _currentDownloadToken = CancelToken();
 
-      // 下载文件
-      await _dio.download(
-        updateInfo.downloadUrl,
-        filePath,
-        cancelToken: _currentDownloadToken,
-        onReceiveProgress: (received, total) {
-          if (total > 0) {
-            onProgress?.call(received, total);
-          }
-        },
-      );
+      debugPrint('开始下载: ${updateInfo.downloadUrl}');
+      debugPrint('保存路径: $filePath');
 
+      // 尝试使用 Dio 下载
+      bool downloadSuccess = false;
+
+      try {
+        downloadSuccess = await _downloadWithDio(
+          updateInfo.downloadUrl,
+          filePath,
+          updateInfo.fileSize,
+          onProgress,
+        );
+      } catch (e) {
+        debugPrint('Dio 下载失败: $e');
+      }
+
+      // 如果 Dio 下载失败，尝试使用原生 HttpClient
+      if (!downloadSuccess) {
+        debugPrint('尝试使用原生 HttpClient 下载...');
+        try {
+          downloadSuccess = await _downloadWithHttpClient(
+            updateInfo.downloadUrl,
+            filePath,
+            updateInfo.fileSize,
+            onProgress,
+          );
+        } catch (e) {
+          debugPrint('HttpClient 下载失败: $e');
+        }
+      }
+
+      // 验证下载的文件
+      final downloadedFile = File(filePath);
+      if (await downloadedFile.exists()) {
+        final downloadedSize = await downloadedFile.length();
+        debugPrint('下载完成，文件大小: $downloadedSize bytes');
+
+        // 允许一定的大小误差（因为有时候 GitHub 报告的大小可能略有不同）
+        if (downloadedSize > 0) {
+          _currentDownloadToken = null;
+          return filePath;
+        }
+      }
+
+      debugPrint('下载失败: 文件为空或不存在');
       _currentDownloadToken = null;
-      return filePath;
-    } catch (e) {
+      return null;
+    } catch (e, stackTrace) {
       if (e is DioException && e.type == DioExceptionType.cancel) {
         debugPrint('下载已取消');
       } else {
         debugPrint('下载更新异常: $e');
+        debugPrint('堆栈: $stackTrace');
       }
       return null;
+    }
+  }
+
+  /// 使用 Dio 下载文件
+  Future<bool> _downloadWithDio(
+    String url,
+    String filePath,
+    int expectedSize,
+    DownloadProgressCallback? onProgress,
+  ) async {
+    // 先获取真实的下载链接（处理 GitHub 的重定向）
+    String actualDownloadUrl = url;
+    try {
+      final headResponse = await _downloadDio.head(
+        url,
+        options: Options(
+          followRedirects: false,
+          validateStatus: (status) => status != null && status < 400,
+        ),
+      );
+
+      // 如果是重定向，获取实际的下载 URL
+      if (headResponse.statusCode == 302 || headResponse.statusCode == 301) {
+        final location = headResponse.headers.value('location');
+        if (location != null && location.isNotEmpty) {
+          actualDownloadUrl = location;
+          debugPrint('Dio: 重定向到: $actualDownloadUrl');
+        }
+      }
+    } catch (e) {
+      debugPrint('获取重定向链接失败，使用原始链接: $e');
+    }
+
+    // 下载文件
+    await _downloadDio.download(
+      actualDownloadUrl,
+      filePath,
+      cancelToken: _currentDownloadToken,
+      options: Options(
+        followRedirects: true,
+        maxRedirects: 10,
+        validateStatus: (status) => status != null && status < 400,
+      ),
+      onReceiveProgress: (received, total) {
+        if (total > 0) {
+          onProgress?.call(received, total);
+        } else {
+          onProgress?.call(received, expectedSize);
+        }
+      },
+    );
+
+    return true;
+  }
+
+  /// 使用原生 HttpClient 下载文件（作为备用方案）
+  Future<bool> _downloadWithHttpClient(
+    String url,
+    String filePath,
+    int expectedSize,
+    DownloadProgressCallback? onProgress,
+  ) async {
+    final client = HttpClient();
+    client.userAgent = 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36';
+
+    try {
+      var request = await client.getUrl(Uri.parse(url));
+      var response = await request.close();
+
+      // 跟随重定向
+      int redirectCount = 0;
+      while (response.isRedirect && redirectCount < 10) {
+        final location = response.headers.value('location');
+        if (location == null) break;
+
+        debugPrint('HttpClient: 重定向到: $location');
+        response.drain();
+
+        final redirectUri = Uri.parse(location);
+        request = await client.getUrl(redirectUri);
+        response = await request.close();
+        redirectCount++;
+      }
+
+      if (response.statusCode != 200) {
+        debugPrint('HttpClient: 响应状态码: ${response.statusCode}');
+        return false;
+      }
+
+      final contentLength = response.contentLength;
+      final totalBytes = contentLength > 0 ? contentLength : expectedSize;
+
+      final file = File(filePath);
+      final sink = file.openWrite();
+      int receivedBytes = 0;
+
+      await for (final chunk in response) {
+        sink.add(chunk);
+        receivedBytes += chunk.length;
+        onProgress?.call(receivedBytes, totalBytes);
+      }
+
+      await sink.close();
+      return true;
+    } finally {
+      client.close();
     }
   }
 
@@ -363,5 +527,6 @@ class UpdateService {
   void dispose() {
     cancelDownload();
     _dio.close();
+    _downloadDio.close();
   }
 }
