@@ -18,7 +18,11 @@ class AuthStorage {
   static const String _keyUsername = 'auth_username';
   static const String _keyPassword = 'auth_password';
   static const String _keyRememberMe = 'auth_remember_me';
+  static const String _keyRememberedUsername =
+      'auth_remembered_username'; // 记忆的账号（不勾选记住密码时也保存）
   static const String _keySemesterStartDate = 'semester_start_date';
+  static const String _keySilentLoginFailCount =
+      'silent_login_fail_count'; // 静默登录失败次数
 
   // 缓存相关 keys
   static const String _keyWeatherCache = 'cache_weather';
@@ -27,6 +31,8 @@ class AuthStorage {
   static const String _keyScheduleCacheTime = 'cache_schedule_time';
   static const String _keyGradesCache = 'cache_grades';
   static const String _keyGradesCacheTime = 'cache_grades_time';
+  static const String _keyUserCache = 'cache_user';
+  static const String _keyUserCacheTime = 'cache_user_time';
 
   // 天气城市相关 keys
   static const String _keyWeatherCityPinyin = 'weather_city_pinyin';
@@ -36,6 +42,16 @@ class AuthStorage {
   static const int weatherCacheMinutes = 30; // 天气缓存30分钟
   static const int scheduleCacheMinutes = 480; // 课程表缓存8小时（480分钟）
   static const int gradesCacheMinutes = 21600; // 成绩缓存15天（15*24*60=21600分钟）
+  static const int userCacheMinutes = 43200; // 用户信息缓存30天（30*24*60=43200分钟）
+
+  // 通知状态相关 keys
+  static const String _keyReadNotificationIds = 'read_notification_ids';
+  static const String _keyLastUpdateVersion =
+      'last_update_version'; // 上次显示的更新版本
+
+  // 天气API限流相关 keys
+  static const String _keyWeatherApiCallTimes = 'weather_api_call_times';
+  static const int weatherApiMaxCallsPerMinute = 5; // 每分钟最多调用5次
 
   /// 保存登录凭据
   static Future<void> saveCredentials({
@@ -46,6 +62,10 @@ class AuthStorage {
     await prefs.setString(_keyUsername, username);
     await prefs.setString(_keyPassword, password);
     await prefs.setBool(_keyRememberMe, true);
+    // 同时保存记忆的账号
+    await prefs.setString(_keyRememberedUsername, username);
+    // 成功保存凭据后重置静默登录失败计数
+    await prefs.setInt(_keySilentLoginFailCount, 0);
   }
 
   /// 获取保存的凭据
@@ -67,18 +87,51 @@ class AuthStorage {
     return StoredCredentials(username: username, password: password);
   }
 
-  /// 清除保存的凭据
+  /// 清除保存的凭据（保留记忆的账号）
   static Future<void> clearCredentials() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyUsername);
     await prefs.remove(_keyPassword);
     await prefs.setBool(_keyRememberMe, false);
+    // 不清除 _keyRememberedUsername，保留记忆的账号
   }
 
   /// 检查是否有保存的凭据
   static Future<bool> hasCredentials() async {
     final credentials = await getCredentials();
     return credentials != null;
+  }
+
+  /// 保存记忆的账号（即使不勾选记住密码）
+  static Future<void> saveRememberedUsername(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyRememberedUsername, username);
+  }
+
+  /// 获取记忆的账号
+  static Future<String?> getRememberedUsername() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyRememberedUsername);
+  }
+
+  /// 增加静默登录失败计数
+  static Future<int> incrementSilentLoginFailCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final count = (prefs.getInt(_keySilentLoginFailCount) ?? 0) + 1;
+    await prefs.setInt(_keySilentLoginFailCount, count);
+    return count;
+  }
+
+  /// 重置静默登录失败计数
+  static Future<void> resetSilentLoginFailCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keySilentLoginFailCount, 0);
+  }
+
+  /// 获取静默登录失败计数
+  static Future<int> getSilentLoginFailCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keySilentLoginFailCount) ?? 0;
   }
 
   /// 保存开学日期
@@ -397,6 +450,7 @@ class AuthStorage {
     await clearWeatherCache();
     await clearScheduleCache();
     await clearGradesCache();
+    await clearUserCache();
   }
 
   // ==================== 成绩缓存 ====================
@@ -437,6 +491,151 @@ class AuthStorage {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyGradesCache);
     await prefs.remove(_keyGradesCacheTime);
+  }
+
+  // ==================== 用户信息缓存 ====================
+
+  /// 保存用户信息缓存
+  static Future<void> saveUserCache(String jsonData) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyUserCache, jsonData);
+    await prefs.setString(_keyUserCacheTime, DateTime.now().toIso8601String());
+  }
+
+  /// 获取用户信息缓存
+  /// 返回 (缓存数据, 是否有效)
+  static Future<(String?, bool)> getUserCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_keyUserCache);
+    final timeStr = prefs.getString(_keyUserCacheTime);
+
+    if (data == null || timeStr == null) {
+      return (null, false);
+    }
+
+    final cachedAt = DateTime.tryParse(timeStr);
+    if (cachedAt == null) {
+      return (data, false);
+    }
+
+    final isValid =
+        DateTime.now().difference(cachedAt).inMinutes < userCacheMinutes;
+    return (data, isValid);
+  }
+
+  /// 清除用户信息缓存
+  static Future<void> clearUserCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyUserCache);
+    await prefs.remove(_keyUserCacheTime);
+  }
+
+  // ==================== 通知状态存储 ====================
+
+  /// 保存已读通知ID列表
+  static Future<void> saveReadNotificationIds(Set<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyReadNotificationIds, ids.toList());
+  }
+
+  /// 获取已读通知ID列表
+  static Future<Set<String>> getReadNotificationIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_keyReadNotificationIds);
+    return list?.toSet() ?? {};
+  }
+
+  /// 标记通知为已读
+  static Future<void> markNotificationAsRead(String id) async {
+    final ids = await getReadNotificationIds();
+    ids.add(id);
+    await saveReadNotificationIds(ids);
+  }
+
+  /// 检查通知是否已读
+  static Future<bool> isNotificationRead(String id) async {
+    final ids = await getReadNotificationIds();
+    return ids.contains(id);
+  }
+
+  /// 清除已读通知记录
+  static Future<void> clearReadNotificationIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyReadNotificationIds);
+  }
+
+  /// 保存上次显示的更新版本
+  static Future<void> saveLastUpdateVersion(String version) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyLastUpdateVersion, version);
+  }
+
+  /// 获取上次显示的更新版本
+  static Future<String?> getLastUpdateVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyLastUpdateVersion);
+  }
+
+  // ==================== 天气API限流 ====================
+
+  /// 记录天气API调用时间
+  static Future<void> recordWeatherApiCall() async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final callTimesStr = prefs.getStringList(_keyWeatherApiCallTimes) ?? [];
+
+    // 过滤掉1分钟前的调用记录
+    final oneMinuteAgo = now - 60000;
+    final recentCalls = callTimesStr
+        .map((s) => int.tryParse(s) ?? 0)
+        .where((t) => t > oneMinuteAgo)
+        .toList();
+
+    // 添加当前调用时间
+    recentCalls.add(now);
+
+    // 保存
+    await prefs.setStringList(
+      _keyWeatherApiCallTimes,
+      recentCalls.map((t) => t.toString()).toList(),
+    );
+  }
+
+  /// 检查是否可以调用天气API（限流检查）
+  /// 返回 (是否可以调用, 剩余等待秒数)
+  static Future<(bool, int)> canCallWeatherApi() async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final callTimesStr = prefs.getStringList(_keyWeatherApiCallTimes) ?? [];
+
+    // 过滤掉1分钟前的调用记录
+    final oneMinuteAgo = now - 60000;
+    final recentCalls = callTimesStr
+        .map((s) => int.tryParse(s) ?? 0)
+        .where((t) => t > oneMinuteAgo)
+        .toList();
+
+    if (recentCalls.length >= weatherApiMaxCallsPerMinute) {
+      // 计算需要等待的时间（最早的调用时间 + 60秒 - 当前时间）
+      final oldestCall = recentCalls.reduce((a, b) => a < b ? a : b);
+      final waitSeconds = ((oldestCall + 60000 - now) / 1000).ceil();
+      return (false, waitSeconds > 0 ? waitSeconds : 1);
+    }
+
+    return (true, 0);
+  }
+
+  /// 获取最近1分钟内的API调用次数
+  static Future<int> getRecentWeatherApiCallCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final callTimesStr = prefs.getStringList(_keyWeatherApiCallTimes) ?? [];
+
+    final oneMinuteAgo = now - 60000;
+    return callTimesStr
+        .map((s) => int.tryParse(s) ?? 0)
+        .where((t) => t > oneMinuteAgo)
+        .length;
   }
 }
 

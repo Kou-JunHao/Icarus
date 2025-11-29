@@ -12,6 +12,9 @@ void main() async {
   // 初始化版本信息
   await UpdateService.initVersionInfo();
 
+  // 清理旧的更新安装包（在后台执行，不阻塞启动）
+  UpdateService().clearDownloadCache();
+
   // 初始化主题服务
   await ThemeService().init();
 
@@ -293,6 +296,13 @@ class _AppNavigatorState extends State<AppNavigator>
   bool _isLoggedIn = false;
   bool _isLoading = true;
   String? _loadingMessage;
+  String? _loginErrorMessage; // 登录失败的错误消息（传递给登录页面）
+
+  // 静默登录失败最大次数
+  static const int _maxSilentLoginFailures = 10;
+
+  // 是否有保存的凭据（用于无感登录）
+  bool _hasCredentials = false;
 
   // 加载动画控制器
   late AnimationController _loadingAnimationController;
@@ -347,13 +357,37 @@ class _AppNavigatorState extends State<AppNavigator>
 
       if (result is LoginSuccess) {
         debugPrint('无感自动重登成功');
+        // 重置失败计数
+        await AuthStorage.resetSilentLoginFailCount();
         return true;
       } else {
         debugPrint('无感自动重登失败');
+        // 增加失败计数
+        final failCount = await AuthStorage.incrementSilentLoginFailCount();
+        debugPrint('静默登录失败次数: $failCount');
+
+        // 如果失败次数达到上限，返回登录页面
+        if (failCount >= _maxSilentLoginFailures) {
+          debugPrint('静默登录失败次数达到上限，返回登录页面');
+          if (mounted) {
+            setState(() {
+              _isLoggedIn = false;
+              _loginErrorMessage = '登录凭证已失效，请重新登录';
+            });
+          }
+        }
         return false;
       }
     } catch (e) {
       debugPrint('无感自动重登异常: $e');
+      // 增加失败计数
+      final failCount = await AuthStorage.incrementSilentLoginFailCount();
+      if (failCount >= _maxSilentLoginFailures && mounted) {
+        setState(() {
+          _isLoggedIn = false;
+          _loginErrorMessage = '登录凭证已失效，请重新登录';
+        });
+      }
       return false;
     }
   }
@@ -368,41 +402,71 @@ class _AppNavigatorState extends State<AppNavigator>
     try {
       final credentials = await AuthStorage.getCredentials();
       if (credentials != null) {
-        setState(() {
-          _loadingMessage = '正在自动登录...';
-        });
+        // 有保存的凭据，直接进入主页（无感登录）
+        // Cookie 失效时会通过 _performAutoRelogin 在后台自动处理
+        _hasCredentials = true;
+        _initDataManager();
 
-        final result = await _jwxtService.autoLogin(
-          username: credentials.username,
-          password: credentials.password,
-          onProgress: (message) {
-            if (mounted) {
-              setState(() {
-                _loadingMessage = message;
-              });
-            }
-          },
-        );
+        // 启用延迟刷新模式，先加载缓存数据，10秒后再从网络刷新
+        _dataManager?.initialize(delayedRefresh: true);
 
-        if (result is LoginSuccess) {
-          if (mounted) {
-            _initDataManager();
-            setState(() {
-              _isLoggedIn = true;
-              _isLoading = false;
-            });
-          }
-          return;
+        if (mounted) {
+          setState(() {
+            _isLoggedIn = true;
+            _isLoading = false;
+          });
         }
+
+        // 在后台静默执行登录以获取/刷新 Cookie
+        _performSilentLogin(credentials.username, credentials.password);
+        return;
       }
     } catch (e) {
-      debugPrint('自动登录失败: $e');
+      debugPrint('检查凭据失败: $e');
     }
 
+    // 没有保存的凭据，显示登录页面
     if (mounted) {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  /// 后台静默登录（不影响前端显示）
+  Future<void> _performSilentLogin(String username, String password) async {
+    try {
+      debugPrint('正在后台静默登录...');
+      final result = await _jwxtService.autoLogin(
+        username: username,
+        password: password,
+      );
+
+      if (result is LoginSuccess) {
+        debugPrint('后台静默登录成功');
+        await AuthStorage.resetSilentLoginFailCount();
+      } else {
+        debugPrint('后台静默登录失败');
+        final failCount = await AuthStorage.incrementSilentLoginFailCount();
+        debugPrint('静默登录失败次数: $failCount');
+
+        // 达到失败上限，返回登录页面
+        if (failCount >= _maxSilentLoginFailures && mounted) {
+          setState(() {
+            _isLoggedIn = false;
+            _loginErrorMessage = '登录凭证已失效，请重新登录';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('后台静默登录异常: $e');
+      final failCount = await AuthStorage.incrementSilentLoginFailCount();
+      if (failCount >= _maxSilentLoginFailures && mounted) {
+        setState(() {
+          _isLoggedIn = false;
+          _loginErrorMessage = '登录凭证已失效，请重新登录';
+        });
+      }
     }
   }
 
@@ -423,8 +487,11 @@ class _AppNavigatorState extends State<AppNavigator>
 
   void _onLoginSuccess() {
     _initDataManager();
+    // 重置失败计数和错误消息
+    AuthStorage.resetSilentLoginFailCount();
     setState(() {
       _isLoggedIn = true;
+      _loginErrorMessage = null;
     });
   }
 
@@ -432,10 +499,12 @@ class _AppNavigatorState extends State<AppNavigator>
     await _jwxtService.logout();
     await AuthStorage.clearCredentials();
     await AuthStorage.clearAllDataCache(); // 清除所有数据缓存
+    await AuthStorage.resetSilentLoginFailCount(); // 重置失败计数
     _dataManager?.dispose();
     _dataManager = null;
     setState(() {
       _isLoggedIn = false;
+      _loginErrorMessage = null;
     });
   }
 
@@ -567,6 +636,7 @@ class _AppNavigatorState extends State<AppNavigator>
       return LoginScreen(
         jwxtService: _jwxtService,
         onLoginSuccess: _onLoginSuccess,
+        errorMessage: _loginErrorMessage,
       );
     }
   }

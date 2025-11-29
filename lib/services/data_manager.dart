@@ -19,7 +19,16 @@ enum LoadingState { idle, loading, loaded, error }
 class DataManager extends ChangeNotifier {
   final JwxtService jwxtService;
 
+  // 是否启用延迟刷新模式（无感登录时使用）
+  bool _delayedRefreshMode = false;
+  static const int _delayedRefreshSeconds = 10; // 延迟刷新时间（秒）
+
   DataManager({required this.jwxtService});
+
+  /// 设置延迟刷新模式
+  void setDelayedRefreshMode(bool enabled) {
+    _delayedRefreshMode = enabled;
+  }
 
   // 用户信息
   User? _user;
@@ -51,16 +60,109 @@ class DataManager extends ChangeNotifier {
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
+  // 是否已初始化
+  bool _initialized = false;
+  bool get isInitialized => _initialized;
+
   /// 初始化数据（登录成功后调用）
-  Future<void> initialize() async {
-    // 并行加载所有数据
-    await Future.wait([loadUserInfo(), loadSchedule(), loadGrades()]);
+  /// [delayedRefresh] 是否延迟刷新数据（无感登录模式）
+  Future<void> initialize({bool delayedRefresh = false}) async {
+    // 避免重复初始化
+    if (_initialized) {
+      debugPrint('DataManager 已经初始化，跳过');
+      return;
+    }
+    _initialized = true;
+    _delayedRefreshMode = delayedRefresh;
+
+    // 先从缓存加载数据（立即显示）
+    await Future.wait([
+      _loadUserFromCache(),
+      _loadScheduleFromCache(),
+      _loadGradesFromCache(),
+    ]);
+
+    if (delayedRefresh) {
+      // 延迟刷新模式：等待一段时间后再从网络刷新
+      debugPrint('延迟 $_delayedRefreshSeconds 秒后刷新数据...');
+      Future.delayed(Duration(seconds: _delayedRefreshSeconds), () {
+        if (!_disposed) {
+          _refreshDataFromNetwork();
+        }
+      });
+    } else {
+      // 立即刷新模式
+      await _refreshDataFromNetwork();
+    }
+  }
+
+  bool _disposed = false;
+
+  /// 从网络刷新数据
+  Future<void> _refreshDataFromNetwork() async {
+    await Future.wait([
+      loadUserInfo(forceRefresh: true),
+      loadSchedule(forceRefresh: true),
+      loadGrades(forceRefresh: true),
+    ]);
+  }
+
+  /// 从缓存加载用户信息
+  Future<bool> _loadUserFromCache() async {
+    try {
+      final (cacheData, isValid) = await AuthStorage.getUserCache();
+      if (cacheData != null) {
+        final json = jsonDecode(cacheData) as Map<String, dynamic>;
+        _user = User.fromJson(json);
+        _userState = LoadingState.loaded;
+        debugPrint('使用用户信息缓存数据 (有效: $isValid)');
+        notifyListeners();
+        return isValid; // 返回缓存是否有效，无效时需要刷新
+      }
+    } catch (e) {
+      debugPrint('读取用户信息缓存失败: $e');
+    }
+    return false;
+  }
+
+  /// 保存用户信息到缓存
+  Future<void> _saveUserToCache(User user) async {
+    try {
+      final json = jsonEncode(user.toJson());
+      await AuthStorage.saveUserCache(json);
+    } catch (e) {
+      debugPrint('保存用户信息缓存失败: $e');
+    }
   }
 
   /// 加载用户信息
   Future<void> loadUserInfo({bool forceRefresh = false}) async {
     if (_userState == LoadingState.loading) return;
-    if (!forceRefresh && _user != null) return;
+
+    // 非强制刷新时，先尝试从缓存加载
+    if (!forceRefresh) {
+      if (_user != null) return; // 内存中已有数据
+
+      // 尝试从持久化缓存加载
+      final (cacheData, isValid) = await AuthStorage.getUserCache();
+      if (cacheData != null) {
+        try {
+          final json = jsonDecode(cacheData) as Map<String, dynamic>;
+          _user = User.fromJson(json);
+          _userState = LoadingState.loaded;
+          notifyListeners();
+
+          // 如果缓存无效（超过30天），在后台刷新
+          if (!isValid) {
+            debugPrint('用户信息缓存已过期，后台刷新...');
+            _refreshUserInBackground();
+          }
+          return;
+        } catch (e) {
+          debugPrint('解析用户信息缓存失败: $e');
+        }
+      }
+    }
 
     _userState = LoadingState.loading;
     _errorMessage = null;
@@ -71,10 +173,15 @@ class DataManager extends ChangeNotifier {
       if (user != null) {
         _user = user;
         _userState = LoadingState.loaded;
+        // 保存到缓存
+        await _saveUserToCache(user);
       } else {
         // 如果获取详细信息失败，使用基本信息
         _user = jwxtService.currentUser;
         _userState = _user != null ? LoadingState.loaded : LoadingState.error;
+        if (_user != null) {
+          await _saveUserToCache(_user!);
+        }
       }
     } catch (e) {
       _errorMessage = '加载用户信息失败: $e';
@@ -85,16 +192,32 @@ class DataManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 后台刷新用户信息（不影响UI状态）
+  Future<void> _refreshUserInBackground() async {
+    try {
+      final user = await jwxtService.getUserInfo();
+      if (user != null) {
+        _user = user;
+        await _saveUserToCache(user);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('后台刷新用户信息失败: $e');
+    }
+  }
+
   /// 从缓存加载课程表
   Future<bool> _loadScheduleFromCache() async {
     try {
       final (cacheData, isValid) = await AuthStorage.getScheduleCache();
-      if (cacheData != null && isValid) {
+      if (cacheData != null) {
         final json = jsonDecode(cacheData) as Map<String, dynamic>;
         _schedule = Schedule.fromJson(json);
         _currentWeek = await AuthStorage.calculateCurrentWeek();
-        debugPrint('使用课程表缓存数据');
-        return true;
+        _scheduleState = LoadingState.loaded;
+        debugPrint('使用课程表缓存数据 (有效: $isValid)');
+        notifyListeners();
+        return isValid;
       }
     } catch (e) {
       debugPrint('读取课程表缓存失败: $e');
@@ -195,13 +318,15 @@ class DataManager extends ChangeNotifier {
   Future<bool> _loadGradesFromCache() async {
     try {
       final (cacheData, isValid) = await AuthStorage.getGradesCache();
-      if (cacheData != null && isValid) {
+      if (cacheData != null) {
         final jsonList = jsonDecode(cacheData) as List<dynamic>;
         _grades = jsonList
             .map((e) => SemesterGrades.fromJson(e as Map<String, dynamic>))
             .toList();
-        debugPrint('使用成绩缓存数据');
-        return true;
+        _gradesState = LoadingState.loaded;
+        debugPrint('使用成绩缓存数据 (有效: $isValid)');
+        notifyListeners();
+        return isValid;
       }
     } catch (e) {
       debugPrint('读取成绩缓存失败: $e');
@@ -400,6 +525,7 @@ class DataManager extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     clearCache();
     super.dispose();
   }

@@ -21,6 +21,7 @@ enum NotificationType {
 
 /// 通知项
 class NotificationItem {
+  final String id; // 唯一标识
   final NotificationType type;
   final String title;
   final String subtitle;
@@ -30,6 +31,7 @@ class NotificationItem {
   final DateTime? time;
 
   const NotificationItem({
+    required this.id,
     required this.type,
     required this.title,
     required this.subtitle,
@@ -72,6 +74,10 @@ class _HomeScreenState extends State<HomeScreen>
   UpdateInfo? _updateInfo;
   bool _isCheckingUpdate = false;
 
+  // 通知状态 - 已读通知ID集合
+  Set<String> _readNotificationIds = {};
+  String? _lastSeenUpdateVersion; // 上次看到的更新版本
+
   // 使用 false 允许页面在不可见时释放内存
   @override
   bool get wantKeepAlive => false;
@@ -85,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    _loadNotificationState(); // 加载通知状态
     _checkCityAndLoadWeather();
     _loadTimetable();
     _checkForUpdate();
@@ -92,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    _saveNotificationState(); // 保存通知状态
     _coursePageController?.dispose();
     _coursePageController = null;
     _weatherService?.dispose();
@@ -99,6 +107,26 @@ class _HomeScreenState extends State<HomeScreen>
     _weather = null;
     _sectionTimes.clear();
     super.dispose();
+  }
+
+  /// 加载通知状态
+  Future<void> _loadNotificationState() async {
+    final readIds = await AuthStorage.getReadNotificationIds();
+    final lastVersion = await AuthStorage.getLastUpdateVersion();
+    if (mounted) {
+      setState(() {
+        _readNotificationIds = readIds;
+        _lastSeenUpdateVersion = lastVersion;
+      });
+    }
+  }
+
+  /// 保存通知状态
+  Future<void> _saveNotificationState() async {
+    await AuthStorage.saveReadNotificationIds(_readNotificationIds);
+    if (_lastSeenUpdateVersion != null) {
+      await AuthStorage.saveLastUpdateVersion(_lastSeenUpdateVersion!);
+    }
   }
 
   /// 获取所有通知列表
@@ -109,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (_updateInfo != null) {
       notifications.add(
         NotificationItem(
+          id: 'update_${_updateInfo!.version}',
           type: NotificationType.update,
           title: '发现新版本 v${_updateInfo!.version}',
           subtitle: '点击查看更新内容',
@@ -126,6 +155,46 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     return notifications;
+  }
+
+  /// 获取未读通知数量
+  /// 注意：update类型的通知在更新完成前始终视为未读
+  int _getUnreadNotificationCount() {
+    final notifications = _getNotifications();
+    return notifications.where((n) {
+      // update 类型通知在更新完成前始终显示为未读
+      if (n.type == NotificationType.update) {
+        return true;
+      }
+      return !_readNotificationIds.contains(n.id);
+    }).length;
+  }
+
+  /// 标记所有通知为已读
+  /// 注意：update 类型的通知不会被标记为已读，必须完成更新后自动清除
+  void _markAllNotificationsAsRead() {
+    final notifications = _getNotifications();
+    setState(() {
+      for (final n in notifications) {
+        // update 类型通知不允许标记为已读
+        if (n.type != NotificationType.update) {
+          _readNotificationIds.add(n.id);
+        }
+      }
+      // 记录当前看到的更新版本（仅用于追踪，不影响红点显示）
+      if (_updateInfo != null) {
+        _lastSeenUpdateVersion = _updateInfo!.version;
+      }
+    });
+    // 异步保存状态
+    _saveNotificationState();
+  }
+
+  /// 清除更新通知（更新完成后调用）
+  void _clearUpdateNotification() {
+    setState(() {
+      _updateInfo = null;
+    });
   }
 
   /// 获取即将开始的课程通知
@@ -156,7 +225,11 @@ class _HomeScreenState extends State<HomeScreen>
       final diff = startTime.difference(now);
       // 30分钟内即将开始的课程
       if (diff.inMinutes > 0 && diff.inMinutes <= 30) {
+        // 使用课程名+日期+节次作为唯一ID
+        final courseId =
+            'course_${course.name}_${now.year}${now.month}${now.day}_${course.startSection}';
         return NotificationItem(
+          id: courseId,
           type: NotificationType.course,
           title: '${course.name} 即将开始',
           subtitle: '${diff.inMinutes}分钟后 · ${course.location ?? "未知地点"}',
@@ -240,8 +313,31 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// 加载天气数据
   /// [forceRefresh] 是否强制刷新（忽略缓存）
-  Future<void> _loadWeather({bool forceRefresh = false}) async {
+  /// [showRateLimitMessage] 是否显示限流提示（用户手动刷新时显示）
+  Future<void> _loadWeather({
+    bool forceRefresh = false,
+    bool showRateLimitMessage = false,
+  }) async {
     if (!_hasCity) return;
+
+    // 如果是强制刷新，检查API调用限制
+    if (forceRefresh) {
+      final (canCall, waitSeconds) = await AuthStorage.canCallWeatherApi();
+      if (!canCall) {
+        if (showRateLimitMessage && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('操作太频繁，请 $waitSeconds 秒后再试'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
+      // 记录API调用
+      await AuthStorage.recordWeatherApiCall();
+    }
 
     setState(() {
       _isLoadingWeather = true;
@@ -441,16 +537,17 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// 构建通知按钮（按钮样式，支持多种通知）
+  /// 按钮始终为激活状态，通过红点来表示是否有未读通知
   Widget _buildNotificationButton(ColorScheme colorScheme) {
     final notifications = _getNotifications();
-    final hasNotifications = notifications.isNotEmpty;
+    final unreadCount = _getUnreadNotificationCount();
+    final hasUnread = unreadCount > 0;
 
     return Container(
       margin: const EdgeInsets.only(right: 4),
       child: Material(
-        color: hasNotifications
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest,
+        // 始终使用激活状态的背景色
+        color: colorScheme.primaryContainer,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
@@ -464,53 +561,39 @@ class _HomeScreenState extends State<HomeScreen>
                   clipBehavior: Clip.none,
                   children: [
                     Icon(
-                      hasNotifications
-                          ? Icons.notifications_active_rounded
-                          : Icons.notifications_outlined,
+                      Icons.notifications_rounded,
                       size: 20,
-                      color: hasNotifications
-                          ? colorScheme.onPrimaryContainer
-                          : colorScheme.onSurfaceVariant,
+                      color: colorScheme.onPrimaryContainer,
                     ),
-                    // 通知数量徽章
-                    if (hasNotifications)
+                    // 红点指示器 - 只有在有未读通知时显示
+                    if (hasUnread)
                       Positioned(
-                        right: -6,
-                        top: -4,
+                        right: -2,
+                        top: -2,
                         child: Container(
-                          padding: const EdgeInsets.all(4),
+                          width: 10,
+                          height: 10,
                           decoration: BoxDecoration(
                             color: colorScheme.error,
                             shape: BoxShape.circle,
-                          ),
-                          constraints: const BoxConstraints(
-                            minWidth: 16,
-                            minHeight: 16,
-                          ),
-                          child: Text(
-                            '${notifications.length}',
-                            style: TextStyle(
-                              color: colorScheme.onError,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+                            border: Border.all(
+                              color: colorScheme.primaryContainer,
+                              width: 1.5,
                             ),
-                            textAlign: TextAlign.center,
                           ),
                         ),
                       ),
                   ],
                 ),
-                if (hasNotifications) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    '通知',
-                    style: TextStyle(
-                      color: colorScheme.onPrimaryContainer,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
+                const SizedBox(width: 8),
+                Text(
+                  '通知',
+                  style: TextStyle(
+                    color: colorScheme.onPrimaryContainer,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
+                ),
               ],
             ),
           ),
@@ -523,6 +606,9 @@ class _HomeScreenState extends State<HomeScreen>
   void _showNotificationPanel(List<NotificationItem> notifications) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+
+    // 打开通知面板时标记所有通知为已读
+    _markAllNotificationsAsRead();
 
     showModalBottomSheet(
       context: context,
@@ -874,7 +960,8 @@ class _HomeScreenState extends State<HomeScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
-          onTap: () => _loadWeather(forceRefresh: true),
+          onTap: () =>
+              _loadWeather(forceRefresh: true, showRateLimitMessage: true),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
@@ -1224,7 +1311,10 @@ class _HomeScreenState extends State<HomeScreen>
                       child: FilledButton.icon(
                         onPressed: () {
                           Navigator.pop(context);
-                          _loadWeather(forceRefresh: true);
+                          _loadWeather(
+                            forceRefresh: true,
+                            showRateLimitMessage: true,
+                          );
                         },
                         icon: const Icon(Icons.refresh_rounded, size: 18),
                         label: const Text('刷新'),

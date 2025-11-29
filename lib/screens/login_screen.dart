@@ -11,11 +11,13 @@ import '../services/services.dart';
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
   final JwxtService jwxtService;
+  final String? errorMessage; // 可选的错误消息（从静默登录失败传入）
 
   const LoginScreen({
     super.key,
     required this.onLoginSuccess,
     required this.jwxtService,
+    this.errorMessage,
   });
 
   @override
@@ -64,14 +66,36 @@ class _LoginScreenState extends State<LoginScreen>
 
     _animationController.forward();
     _loadSavedCredentials();
+    // 显示传入的错误消息
+    if (widget.errorMessage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _errorMessage = widget.errorMessage;
+          });
+        }
+      });
+    }
   }
 
   Future<void> _loadSavedCredentials() async {
+    // 优先加载完整凭据
     final credentials = await AuthStorage.getCredentials();
     if (credentials != null && mounted) {
       setState(() {
         _usernameController.text = credentials.username;
         _passwordController.text = credentials.password;
+        _rememberPassword = true;
+      });
+      return;
+    }
+
+    // 如果没有完整凭据，尝试加载记忆的账号
+    final rememberedUsername = await AuthStorage.getRememberedUsername();
+    if (rememberedUsername != null && mounted) {
+      setState(() {
+        _usernameController.text = rememberedUsername;
+        _rememberPassword = false;
       });
     }
   }
@@ -114,6 +138,11 @@ class _LoginScreenState extends State<LoginScreen>
           await AuthStorage.saveCredentials(
             username: _usernameController.text.trim(),
             password: _passwordController.text,
+          );
+        } else {
+          // 即使不勾选记住密码，也保存账号
+          await AuthStorage.saveRememberedUsername(
+            _usernameController.text.trim(),
           );
         }
         widget.onLoginSuccess();
@@ -170,6 +199,11 @@ class _LoginScreenState extends State<LoginScreen>
           await AuthStorage.saveCredentials(
             username: _usernameController.text.trim(),
             password: _passwordController.text,
+          );
+        } else {
+          // 即使不勾选记住密码，也保存账号
+          await AuthStorage.saveRememberedUsername(
+            _usernameController.text.trim(),
           );
         }
         widget.onLoginSuccess();
@@ -472,7 +506,6 @@ class _LoginScreenState extends State<LoginScreen>
                 Transform.translate(
                   offset: const Offset(-8, 0),
                   child: Row(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
                         height: 32,
@@ -491,10 +524,31 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                         ),
                       ),
-                      Text(
-                        '记住密码',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _rememberPassword = !_rememberPassword;
+                            });
+                          },
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '记住密码',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                '勾选后下次打开可无感登录',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colorScheme.outline,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
