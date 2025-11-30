@@ -292,6 +292,65 @@ class NotificationService {
     );
   }
 
+  /// 为作业安排通知
+  Future<void> scheduleWorkNotification({
+    required int id,
+    required String workName,
+    String? courseName,
+    required int hoursRemaining,
+    required DateTime scheduledTime,
+  }) async {
+    if (!_isInitialized) await initialize();
+    _initializeTimezone();
+
+    final isEnabled = await isNotificationEnabled();
+    if (!isEnabled) return;
+
+    final hasPermission = await checkPermission();
+    if (!hasPermission) return;
+
+    final courseInfo = courseName != null ? '[$courseName] ' : '';
+    final body = '$courseInfo$workName\n⏰ 距离截止还有 $hoursRemaining 小时，请尽快完成！';
+
+    final androidDetails = AndroidNotificationDetails(
+      'work_reminder',
+      '作业提醒',
+      channelDescription: '作业截止前的提醒通知',
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      icon: '@mipmap/ic_launcher',
+      styleInformation: BigTextStyleInformation(body),
+    );
+
+    const darwinDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: darwinDetails,
+    );
+
+    await _notifications.zonedSchedule(
+      id,
+      '📚 作业即将截止',
+      body,
+      tz.TZDateTime.from(scheduledTime, tz.local),
+      details,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      payload: 'work_$workName',
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      matchDateTimeComponents: DateTimeComponents.dateAndTime,
+    );
+
+    debugPrint('已安排作业通知: $workName, 时间: $scheduledTime');
+  }
+
   /// 立即显示通知（用于测试）
   Future<void> showTestNotification() async {
     if (!_isInitialized) await initialize();

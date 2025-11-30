@@ -44,6 +44,9 @@ dependencies:
   cookie_jar: ^4.0.8
   dio_cookie_manager: ^3.1.1
 
+  # HTML 解析（学习通作业列表）
+  html: ^0.15.5
+
   # 本地存储
   shared_preferences: ^2.3.3
   path_provider: ^2.1.5

@@ -8,3 +8,5 @@ export 'grades_screen.dart';
 export 'profile_screen.dart';
 export 'main_shell.dart';
 export 'update_dialog.dart';
+export 'account_manage_screen.dart';
+export 'xxt_work_screen.dart';

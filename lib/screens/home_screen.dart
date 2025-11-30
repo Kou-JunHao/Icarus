@@ -11,6 +11,7 @@ import '../models/models.dart';
 import '../services/services.dart';
 import 'schedule_screen.dart' show CourseColors;
 import 'update_dialog.dart';
+import 'xxt_work_screen.dart';
 
 /// 通知类型
 enum NotificationType {
@@ -78,6 +79,10 @@ class _HomeScreenState extends State<HomeScreen>
   Set<String> _readNotificationIds = {};
   String? _lastSeenUpdateVersion; // 上次看到的更新版本
 
+  // 即将截止的作业
+  List<XxtWork> _urgentWorks = [];
+  bool _isLoadingWorks = false;
+
   // 使用 false 允许页面在不可见时释放内存
   @override
   bool get wantKeepAlive => false;
@@ -95,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen>
     _checkCityAndLoadWeather();
     _loadTimetable();
     _checkForUpdate();
+    _loadUrgentWorks(); // 加载即将截止的作业
   }
 
   @override
@@ -421,6 +427,143 @@ class _HomeScreenState extends State<HomeScreen>
     return courses.length - 1;
   }
 
+  /// 加载即将截止的作业（24小时内）
+  Future<void> _loadUrgentWorks() async {
+    if (_isLoadingWorks) return;
+
+    setState(() {
+      _isLoadingWorks = true;
+    });
+
+    try {
+      final xxtService = XxtService();
+      final result = await xxtService.getUnfinishedWorks();
+
+      if (mounted && result.success) {
+        // 筛选出即将截止的作业（24小时内，不包括已超时的）
+        final urgentWorks = result.works
+            .where((w) => w.isUrgent && !w.isOverdue)
+            .toList();
+
+        setState(() {
+          _urgentWorks = urgentWorks;
+          _isLoadingWorks = false;
+        });
+
+        // 安排作业提醒通知
+        _scheduleWorkNotifications(result.works);
+      } else {
+        setState(() {
+          _isLoadingWorks = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('加载作业失败: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingWorks = false;
+        });
+      }
+    }
+  }
+
+  /// 安排作业截止提醒通知
+  Future<void> _scheduleWorkNotifications(List<XxtWork> works) async {
+    final notificationService = NotificationService();
+    await notificationService.initialize();
+
+    // 检查通知权限
+    final hasPermission = await notificationService.checkPermission();
+    if (!hasPermission) return;
+
+    // 为即将截止的作业安排通知
+    for (final work in works) {
+      if (work.isOverdue) continue; // 跳过已超时的
+
+      // 解析剩余时间，计算截止时间
+      final deadline = _parseDeadline(work.remainingTime);
+      if (deadline == null) continue;
+
+      final now = DateTime.now();
+      final hoursRemaining = deadline.difference(now).inHours;
+
+      if (hoursRemaining <= 0) continue;
+
+      // 根据剩余时间安排不同频率的通知
+      if (hoursRemaining <= 3) {
+        // 最后3小时，每小时推送
+        for (int h = 1; h <= hoursRemaining; h++) {
+          final notifyTime = deadline.subtract(Duration(hours: h));
+          if (notifyTime.isAfter(now)) {
+            await _scheduleWorkNotification(work, notifyTime, h);
+          }
+        }
+      } else if (hoursRemaining <= 12) {
+        // 12小时内，每3小时推送
+        for (int h = 3; h <= hoursRemaining; h += 3) {
+          final notifyTime = deadline.subtract(Duration(hours: h));
+          if (notifyTime.isAfter(now)) {
+            await _scheduleWorkNotification(work, notifyTime, h);
+          }
+        }
+        // 加上最后3小时的每小时推送
+        for (int h = 1; h <= 3 && h <= hoursRemaining; h++) {
+          final notifyTime = deadline.subtract(Duration(hours: h));
+          if (notifyTime.isAfter(now)) {
+            await _scheduleWorkNotification(work, notifyTime, h);
+          }
+        }
+      }
+    }
+  }
+
+  /// 安排单个作业通知
+  Future<void> _scheduleWorkNotification(
+    XxtWork work,
+    DateTime notifyTime,
+    int hoursRemaining,
+  ) async {
+    final notificationService = NotificationService();
+    final id = '${work.name}_$hoursRemaining'.hashCode;
+
+    await notificationService.scheduleWorkNotification(
+      id: id,
+      workName: work.name,
+      courseName: work.courseName,
+      hoursRemaining: hoursRemaining,
+      scheduledTime: notifyTime,
+    );
+  }
+
+  /// 解析剩余时间字符串，返回截止时间
+  DateTime? _parseDeadline(String remainingTime) {
+    final now = DateTime.now();
+
+    // 尝试解析 "X天X小时X分钟" 格式
+    int days = 0, hours = 0, minutes = 0;
+
+    final daysMatch = RegExp(r'(\d+)\s*天').firstMatch(remainingTime);
+    if (daysMatch != null) {
+      days = int.tryParse(daysMatch.group(1) ?? '0') ?? 0;
+    }
+
+    final hoursMatch = RegExp(r'(\d+)\s*小时').firstMatch(remainingTime);
+    if (hoursMatch != null) {
+      hours = int.tryParse(hoursMatch.group(1) ?? '0') ?? 0;
+    }
+
+    final minutesMatch = RegExp(r'(\d+)\s*分钟').firstMatch(remainingTime);
+    if (minutesMatch != null) {
+      minutes = int.tryParse(minutesMatch.group(1) ?? '0') ?? 0;
+    }
+
+    if (days == 0 && hours == 0 && minutes == 0) {
+      return null;
+    }
+
+    return now.add(Duration(days: days, hours: hours, minutes: minutes));
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -520,6 +663,12 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
 
                       const SizedBox(height: 20),
+
+                      // 即将截止的作业卡片
+                      if (_urgentWorks.isNotEmpty)
+                        _buildUrgentWorksCard(theme, colorScheme),
+
+                      if (_urgentWorks.isNotEmpty) const SizedBox(height: 20),
 
                       // 快捷操作区域（签到按钮）
                       _buildQuickActions(theme, colorScheme),
@@ -1028,19 +1177,17 @@ class _HomeScreenState extends State<HomeScreen>
                         textBaseline: TextBaseline.alphabetic,
                         children: [
                           Text(
-                            '${weather.temperature.round()}°',
-                            style: theme.textTheme.headlineSmall?.copyWith(
+                            '${weather.temperature.round()}°C',
+                            style: theme.textTheme.headlineMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: Colors.white,
-                              height: 1,
                             ),
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 8),
                           Text(
                             weather.description,
-                            style: theme.textTheme.bodyMedium?.copyWith(
+                            style: theme.textTheme.titleMedium?.copyWith(
                               color: Colors.white.withValues(alpha: 0.95),
-                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
@@ -1386,27 +1533,81 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
         ),
-        // 去签到按钮（单独一个，全宽）
-        _buildQuickActionCard(
-          theme,
-          colorScheme,
-          icon: Icons.fact_check_outlined,
-          label: '去签到',
-          subtitle: '打开超星学习通',
-          color: const Color(0xFF2196F3),
-          onTap: _launchXuexitong,
+        // 按钮行
+        Row(
+          children: [
+            // 未交作业按钮
+            Expanded(
+              child: _buildQuickActionButton(
+                theme,
+                colorScheme,
+                icon: Icons.assignment_late_outlined,
+                label: '未交作业',
+                color: const Color(0xFFFF9800),
+                onTap: _openXxtWorkScreen,
+              ),
+            ),
+            const SizedBox(width: 12),
+            // 去签到按钮
+            Expanded(
+              child: _buildQuickActionButton(
+                theme,
+                colorScheme,
+                icon: Icons.fact_check_outlined,
+                label: '去签到',
+                color: const Color(0xFF2196F3),
+                onTap: _launchXuexitong,
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  /// 构建单个快捷操作卡片
-  Widget _buildQuickActionCard(
+  /// 构建快捷操作按钮（统一风格）
+  Widget _buildQuickActionButton(
     ThemeData theme,
     ColorScheme colorScheme, {
     required IconData icon,
     required String label,
-    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建紧凑型快捷操作卡片（一行两个）- 已弃用，使用 _buildQuickActionButton
+  @Deprecated('Use _buildQuickActionButton instead')
+  Widget _buildQuickActionCardCompact(
+    ThemeData theme,
+    ColorScheme colorScheme, {
+    required IconData icon,
+    required String label,
     required Color color,
     required VoidCallback onTap,
   }) {
@@ -1421,48 +1622,38 @@ class _HomeScreenState extends State<HomeScreen>
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, size: 24, color: color),
+                child: Icon(icon, size: 20, color: color),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onSurface,
                 ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 14,
-                color: color.withValues(alpha: 0.6),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// 打开学习通未交作业页面
+  void _openXxtWorkScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const XxtWorkScreen()),
     );
   }
 
@@ -2367,6 +2558,83 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// 构建即将截止的作业卡片
+  Widget _buildUrgentWorksCard(ThemeData theme, ColorScheme colorScheme) {
+    return Card(
+      elevation: 0,
+      color: colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 标题
+            Text(
+              '即将截止的作业',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 作业列表
+            ..._urgentWorks.map((work) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    // 作业名称
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            work.name,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '课程：${work.courseName}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // 剩余时间
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.errorContainer.withValues(
+                          alpha: 0.1,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        work.remainingTime,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colorScheme.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ),
       ),
     );
   }

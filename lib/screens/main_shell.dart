@@ -14,11 +14,13 @@ import 'profile_screen.dart';
 class MainShell extends StatefulWidget {
   final DataManager dataManager;
   final VoidCallback onLogout;
+  final VoidCallback? onSwitchAccount;
 
   const MainShell({
     super.key,
     required this.dataManager,
     required this.onLogout,
+    this.onSwitchAccount,
   });
 
   @override
@@ -127,6 +129,7 @@ class _MainShellState extends State<MainShell> {
           key: const ValueKey('profile'),
           dataManager: widget.dataManager,
           onLogout: widget.onLogout,
+          onSwitchAccount: widget.onSwitchAccount,
         );
       default:
         return HomeScreen(

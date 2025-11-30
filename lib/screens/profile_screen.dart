@@ -8,16 +8,19 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/user.dart';
 import '../services/services.dart';
 import 'update_dialog.dart';
+import 'account_manage_screen.dart';
 
 /// 个人中心屏幕
 class ProfileScreen extends StatefulWidget {
   final DataManager dataManager;
   final VoidCallback onLogout;
+  final VoidCallback? onSwitchAccount;
 
   const ProfileScreen({
     super.key,
     required this.dataManager,
     required this.onLogout,
+    this.onSwitchAccount,
   });
 
   @override
@@ -376,6 +379,20 @@ class _ProfileScreenState extends State<ProfileScreen>
           _buildSettingItem(
             theme,
             colorScheme,
+            Icons.manage_accounts_outlined,
+            '账号管理',
+            '多账号切换',
+            onTap: () => _openAccountManage(),
+          ),
+          Divider(
+            height: 1,
+            indent: 16,
+            endIndent: 16,
+            color: colorScheme.outline.withValues(alpha: 0.1),
+          ),
+          _buildSettingItem(
+            theme,
+            colorScheme,
             Icons.palette_outlined,
             '主题设置',
             themeService.themeModeDisplayName,
@@ -396,6 +413,22 @@ class _ProfileScreenState extends State<ProfileScreen>
             onTap: () => _showNotificationDialog(),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 打开账号管理页面
+  void _openAccountManage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountManageScreen(
+          onAccountSwitch: () {
+            // 账号切换后调用自动登录（而不是登出）
+            Navigator.pop(context); // 先关闭账号管理页面
+            widget.onSwitchAccount?.call();
+          },
+        ),
       ),
     );
   }
@@ -1359,21 +1392,6 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             SizedBox(height: MediaQuery.of(context).padding.bottom),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _showLicensesPage() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => Theme(
-          data: Theme.of(context),
-          child: LicensePage(
-            applicationName: '伊卡洛斯',
-            applicationVersion: UpdateService.currentVersion,
-            applicationLegalese: '© 2025 SKKK. MIT License.',
-          ),
         ),
       ),
     );

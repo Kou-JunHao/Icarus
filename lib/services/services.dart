@@ -9,3 +9,5 @@ export 'theme_service.dart';
 export 'widget_service.dart';
 export 'notification_service.dart';
 export 'update_service.dart';
+export 'account_manager.dart';
+export 'xxt_service.dart';

@@ -18,6 +18,9 @@ void main() async {
   // 初始化主题服务
   await ThemeService().init();
 
+  // 初始化账号管理器
+  await AccountManager().init();
+
   // 初始化小组件服务
   await WidgetService.initialize();
 
@@ -302,6 +305,7 @@ class _AppNavigatorState extends State<AppNavigator>
   static const int _maxSilentLoginFailures = 10;
 
   // 是否有保存的凭据（用于无感登录）
+  // ignore: unused_field
   bool _hasCredentials = false;
 
   // 加载动画控制器
@@ -495,11 +499,104 @@ class _AppNavigatorState extends State<AppNavigator>
     });
   }
 
+  /// 切换账号（使用存储的账号密码自动登录）
+  Future<void> _onSwitchAccount() async {
+    // 显示加载状态
+    setState(() {
+      _isLoading = true;
+      _loadingMessage = '正在切换账号...';
+    });
+
+    // 清除当前数据缓存
+    await AuthStorage.clearAllDataCache();
+    _dataManager?.clearCache();
+
+    // 清除学习通登录状态
+    XxtService().clearSession();
+
+    // 获取当前活跃账号
+    final accountManager = AccountManager();
+    final activeAccount = accountManager.activeAccount;
+
+    if (activeAccount == null) {
+      // 没有活跃账号，跳转到登录页面
+      setState(() {
+        _isLoading = false;
+        _isLoggedIn = false;
+        _loginErrorMessage = null;
+      });
+      return;
+    }
+
+    // 保存新账号的凭据到 AuthStorage（用于自动登录）
+    await AuthStorage.saveCredentials(
+      username: activeAccount.username,
+      password: activeAccount.password,
+    );
+
+    try {
+      // 使用新账号登录
+      setState(() {
+        _loadingMessage = '正在登录...';
+      });
+
+      final result = await _jwxtService.autoLogin(
+        username: activeAccount.username,
+        password: activeAccount.password,
+      );
+
+      if (result is LoginSuccess) {
+        debugPrint('账号切换登录成功');
+        await AuthStorage.resetSilentLoginFailCount();
+
+        // 更新账号管理器中的显示名称（如果获取到了用户名）
+        if (_jwxtService.currentUser?.name != null) {
+          await accountManager.updateDisplayName(
+            activeAccount.id,
+            _jwxtService.currentUser!.name,
+          );
+        }
+
+        // 重新初始化数据管理器
+        _initDataManager();
+        _dataManager?.initialize(delayedRefresh: false);
+
+        if (mounted) {
+          setState(() {
+            _isLoggedIn = true;
+            _isLoading = false;
+            _loginErrorMessage = null;
+          });
+        }
+      } else {
+        // 登录失败
+        debugPrint('账号切换登录失败');
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _isLoggedIn = false;
+            _loginErrorMessage = '账号登录失败，请检查账号密码';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('账号切换异常: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isLoggedIn = false;
+          _loginErrorMessage = '登录失败: $e';
+        });
+      }
+    }
+  }
+
   void _onLogout() async {
     await _jwxtService.logout();
     await AuthStorage.clearCredentials();
     await AuthStorage.clearAllDataCache(); // 清除所有数据缓存
     await AuthStorage.resetSilentLoginFailCount(); // 重置失败计数
+    XxtService().clearSession(); // 清除学习通登录状态
     _dataManager?.dispose();
     _dataManager = null;
     setState(() {
@@ -631,7 +728,11 @@ class _AppNavigatorState extends State<AppNavigator>
 
     // 根据登录状态显示不同页面
     if (_isLoggedIn && _dataManager != null) {
-      return MainShell(dataManager: _dataManager!, onLogout: _onLogout);
+      return MainShell(
+        dataManager: _dataManager!,
+        onLogout: _onLogout,
+        onSwitchAccount: _onSwitchAccount,
+      );
     } else {
       return LoginScreen(
         jwxtService: _jwxtService,
