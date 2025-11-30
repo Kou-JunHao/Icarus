@@ -79,9 +79,11 @@ class _HomeScreenState extends State<HomeScreen>
   Set<String> _readNotificationIds = {};
   String? _lastSeenUpdateVersion; // 上次看到的更新版本
 
-  // 即将截止的作业
-  List<XxtWork> _urgentWorks = [];
+  // 未交作业相关
+  List<XxtWork> _allWorks = []; // 所有未交作业（按截止时间排序）
   bool _isLoadingWorks = false;
+  PageController? _workPageController;
+  int _currentWorkIndex = 0;
 
   // 使用 false 允许页面在不可见时释放内存
   @override
@@ -108,6 +110,8 @@ class _HomeScreenState extends State<HomeScreen>
     _saveNotificationState(); // 保存通知状态
     _coursePageController?.dispose();
     _coursePageController = null;
+    _workPageController?.dispose();
+    _workPageController = null;
     _weatherService?.dispose();
     _weatherService = null;
     _weather = null;
@@ -427,7 +431,7 @@ class _HomeScreenState extends State<HomeScreen>
     return courses.length - 1;
   }
 
-  /// 加载即将截止的作业（24小时内）
+  /// 加载所有未交作业（按截止时间排序）
   Future<void> _loadUrgentWorks() async {
     if (_isLoadingWorks) return;
 
@@ -440,14 +444,21 @@ class _HomeScreenState extends State<HomeScreen>
       final result = await xxtService.getUnfinishedWorks();
 
       if (mounted && result.success) {
-        // 筛选出即将截止的作业（24小时内，不包括已超时的）
-        final urgentWorks = result.works
-            .where((w) => w.isUrgent && !w.isOverdue)
-            .toList();
+        // 获取所有未超时的作业
+        final works = result.works.where((w) => !w.isOverdue).toList();
+
+        // 按截止时间排序（最近截止的排在前面）
+        works.sort((a, b) {
+          final aMinutes = _parseRemainingTimeToMinutes(a.remainingTime);
+          final bMinutes = _parseRemainingTimeToMinutes(b.remainingTime);
+          return aMinutes.compareTo(bMinutes);
+        });
 
         setState(() {
-          _urgentWorks = urgentWorks;
+          _allWorks = works;
           _isLoadingWorks = false;
+          // 重置 PageController 索引
+          _currentWorkIndex = 0;
         });
 
         // 安排作业提醒通知
@@ -467,8 +478,37 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  /// 将剩余时间字符串解析为分钟数（用于排序）
+  int _parseRemainingTimeToMinutes(String remainingTime) {
+    int totalMinutes = 0;
+
+    // 解析天数
+    final daysMatch = RegExp(r'(\d+)\s*天').firstMatch(remainingTime);
+    if (daysMatch != null) {
+      totalMinutes += (int.tryParse(daysMatch.group(1) ?? '0') ?? 0) * 24 * 60;
+    }
+
+    // 解析小时
+    final hoursMatch = RegExp(r'(\d+)\s*小时').firstMatch(remainingTime);
+    if (hoursMatch != null) {
+      totalMinutes += (int.tryParse(hoursMatch.group(1) ?? '0') ?? 0) * 60;
+    }
+
+    // 解析分钟
+    final minutesMatch = RegExp(r'(\d+)\s*分钟').firstMatch(remainingTime);
+    if (minutesMatch != null) {
+      totalMinutes += int.tryParse(minutesMatch.group(1) ?? '0') ?? 0;
+    }
+
+    return totalMinutes;
+  }
+
   /// 安排作业截止提醒通知
   Future<void> _scheduleWorkNotifications(List<XxtWork> works) async {
+    // 检查作业通知是否开启
+    final workNotificationEnabled = await AuthStorage.isWorkNotificationEnabled();
+    if (!workNotificationEnabled) return;
+
     final notificationService = NotificationService();
     await notificationService.initialize();
 
@@ -591,7 +631,7 @@ class _HomeScreenState extends State<HomeScreen>
               slivers: [
                 // 顶部区域
                 SliverAppBar(
-                  expandedHeight: 120,
+                  expandedHeight: 90,
                   pinned: true,
                   backgroundColor: colorScheme.surface,
                   flexibleSpace: FlexibleSpaceBar(
@@ -602,7 +642,7 @@ class _HomeScreenState extends State<HomeScreen>
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+                    titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
                   ),
                   actions: [
                     Padding(
@@ -625,16 +665,19 @@ class _HomeScreenState extends State<HomeScreen>
 
                 // 内容区域
                 SliverPadding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
                       // 日期和周次信息
                       _buildDateHeader(theme, colorScheme, now, currentWeek),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 14),
 
                       // 天气卡片
                       _buildWeatherCard(theme, colorScheme),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 14),
 
                       // 今日课程标题
                       _buildSectionTitle(
@@ -642,7 +685,7 @@ class _HomeScreenState extends State<HomeScreen>
                         '今日课程',
                         isLoading ? 0 : todayCourses.length,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // 加载状态
                       if (isLoading) _buildLoadingState(colorScheme),
@@ -662,13 +705,12 @@ class _HomeScreenState extends State<HomeScreen>
                             todayCourses,
                           ),
 
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 14),
 
-                      // 即将截止的作业卡片
-                      if (_urgentWorks.isNotEmpty)
-                        _buildUrgentWorksCard(theme, colorScheme),
+                      // 作业截止卡片（常驻显示）
+                      _buildWorkDeadlineCard(theme, colorScheme),
 
-                      if (_urgentWorks.isNotEmpty) const SizedBox(height: 20),
+                      const SizedBox(height: 14),
 
                       // 快捷操作区域（签到按钮）
                       _buildQuickActions(theme, colorScheme),
@@ -1601,54 +1643,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// 构建紧凑型快捷操作卡片（一行两个）- 已弃用，使用 _buildQuickActionButton
-  @Deprecated('Use _buildQuickActionButton instead')
-  Widget _buildQuickActionCardCompact(
-    ThemeData theme,
-    ColorScheme colorScheme, {
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Card(
-      elevation: 0,
-      color: color.withValues(alpha: 0.1),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: color.withValues(alpha: 0.2), width: 1),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, size: 20, color: color),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 打开学习通未交作业页面
   void _openXxtWorkScreen() {
     Navigator.push(
@@ -1996,7 +1990,7 @@ class _HomeScreenState extends State<HomeScreen>
       children: [
         // 课程卡片区域
         SizedBox(
-          height: 210, // 固定高度
+          height: 190, // 固定高度
           child: PageView.builder(
             controller: _coursePageController,
             itemCount: courses.length,
@@ -2032,53 +2026,45 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         // 页面指示器
         if (courses.length > 1) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // 左滑提示
               Icon(
                 Icons.chevron_left_rounded,
-                size: 20,
+                size: 18,
                 color: _currentCourseIndex > 0
                     ? colorScheme.onSurfaceVariant
                     : colorScheme.outlineVariant,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               // 指示点
               ...List.generate(courses.length, (index) {
                 final isActive = index == _currentCourseIndex;
                 return AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: isActive ? 20 : 8,
-                  height: 8,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  width: isActive ? 16 : 6,
+                  height: 6,
                   decoration: BoxDecoration(
                     color: isActive
                         ? colorScheme.primary
                         : colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(3),
                   ),
                 );
               }),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               // 右滑提示
               Icon(
                 Icons.chevron_right_rounded,
-                size: 20,
+                size: 18,
                 color: _currentCourseIndex < courses.length - 1
                     ? colorScheme.onSurfaceVariant
                     : colorScheme.outlineVariant,
               ),
             ],
-          ),
-          const SizedBox(height: 4),
-          // 滑动提示文字
-          Text(
-            '左右滑动查看全部 ${courses.length} 节课',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
           ),
         ],
       ],
@@ -2562,78 +2548,338 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// 构建即将截止的作业卡片
-  Widget _buildUrgentWorksCard(ThemeData theme, ColorScheme colorScheme) {
-    return Card(
-      elevation: 0,
-      color: colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  /// 构建作业截止卡片（常驻显示，支持左右滑动）
+  Widget _buildWorkDeadlineCard(ThemeData theme, ColorScheme colorScheme) {
+    // 加载中状态
+    if (_isLoadingWorks) {
+      return Card(
+        elevation: 0,
+        color: colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '正在加载作业...',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 无作业状态
+    if (_allWorks.isEmpty) {
+      return Card(
+        elevation: 0,
+        color: colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _openXxtWorkScreen,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.check_circle_outline_rounded,
+                    size: 20,
+                    color: Colors.green,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '暂无待交作业',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        '点击查看全部作业',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 初始化 PageController
+    _workPageController ??= PageController(initialPage: 0);
+
+    // 确保索引在有效范围内
+    if (_currentWorkIndex >= _allWorks.length) {
+      _currentWorkIndex = _allWorks.length - 1;
+    }
+    if (_currentWorkIndex < 0) {
+      _currentWorkIndex = 0;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 标题行
+        Row(
           children: [
-            // 标题
             Text(
-              '即将截止的作业',
+              '作业情况',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 12),
-            // 作业列表
-            ..._urgentWorks.map((work) {
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: colorScheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '${_allWorks.length}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // 作业卡片滑动区域
+        SizedBox(
+          height: 90,
+          child: PageView.builder(
+            controller: _workPageController,
+            itemCount: _allWorks.length,
+            physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
+            onPageChanged: (index) {
+              if (mounted && _currentWorkIndex != index) {
+                setState(() {
+                  _currentWorkIndex = index;
+                });
+              }
+            },
+            itemBuilder: (context, index) {
+              final work = _allWorks[index];
               return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: _buildWorkCard(theme, colorScheme, work, index),
+              );
+            },
+          ),
+        ),
+        // 页面指示器（仅多于1项时显示）
+        if (_allWorks.length > 1) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.chevron_left_rounded,
+                size: 18,
+                color: _currentWorkIndex > 0
+                    ? colorScheme.onSurfaceVariant
+                    : colorScheme.outlineVariant,
+              ),
+              const SizedBox(width: 4),
+              // 指示点（最多显示5个）
+              ...List.generate(_allWorks.length > 5 ? 5 : _allWorks.length, (
+                index,
+              ) {
+                final actualIndex = _allWorks.length > 5
+                    ? _getVisibleDotIndex(
+                        index,
+                        _currentWorkIndex,
+                        _allWorks.length,
+                      )
+                    : index;
+                final isActive = actualIndex == _currentWorkIndex;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  width: isActive ? 16 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? colorScheme.primary
+                        : colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                );
+              }),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: _currentWorkIndex < _allWorks.length - 1
+                    ? colorScheme.onSurfaceVariant
+                    : colorScheme.outlineVariant,
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 计算可见指示点的实际索引（用于超过5个项目时的滑动显示）
+  int _getVisibleDotIndex(int dotIndex, int currentIndex, int totalCount) {
+    if (totalCount <= 5) return dotIndex;
+
+    // 计算窗口起始位置
+    int windowStart = currentIndex - 2;
+    if (windowStart < 0) windowStart = 0;
+    if (windowStart > totalCount - 5) windowStart = totalCount - 5;
+
+    return windowStart + dotIndex;
+  }
+
+  /// 构建单个作业卡片
+  Widget _buildWorkCard(
+    ThemeData theme,
+    ColorScheme colorScheme,
+    XxtWork work,
+    int index,
+  ) {
+    // 根据紧急程度选择颜色
+    final isUrgent = work.isUrgent;
+    final cardColor = isUrgent
+        ? colorScheme.errorContainer.withValues(alpha: 0.3)
+        : colorScheme.surfaceContainerLow;
+    final accentColor = isUrgent ? colorScheme.error : const Color(0xFFFF9800);
+
+    return Card(
+      elevation: 0,
+      color: cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isUrgent
+              ? colorScheme.error.withValues(alpha: 0.3)
+              : colorScheme.outlineVariant.withValues(alpha: 0.3),
+          width: 0.5,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: _openXxtWorkScreen,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              // 左侧图标
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isUrgent
+                      ? Icons.warning_amber_rounded
+                      : Icons.assignment_outlined,
+                  size: 22,
+                  color: accentColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 中间内容
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // 作业名称
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            work.name,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '课程：${work.courseName}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
+                    Text(
+                      work.name,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(width: 12),
-                    // 剩余时间
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
+                    const SizedBox(height: 4),
+                    Text(
+                      work.courseName ?? '未知课程',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
                       ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.errorContainer.withValues(
-                          alpha: 0.1,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        work.remainingTime,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colorScheme.error,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
-              );
-            }).toList(),
-          ],
+              ),
+              const SizedBox(width: 8),
+              // 右侧剩余时间
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      work.remainingTime,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: accentColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (_allWorks.length > 1) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '${index + 1}/${_allWorks.length}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

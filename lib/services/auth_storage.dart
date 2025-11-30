@@ -33,6 +33,8 @@ class AuthStorage {
   static const String _keyGradesCacheTime = 'cache_grades_time';
   static const String _keyUserCache = 'cache_user';
   static const String _keyUserCacheTime = 'cache_user_time';
+  static const String _keyWorksCache = 'cache_works';
+  static const String _keyWorksCacheTime = 'cache_works_time';
 
   // 天气城市相关 keys
   static const String _keyWeatherCityPinyin = 'weather_city_pinyin';
@@ -43,11 +45,15 @@ class AuthStorage {
   static const int scheduleCacheMinutes = 480; // 课程表缓存8小时（480分钟）
   static const int gradesCacheMinutes = 21600; // 成绩缓存15天（15*24*60=21600分钟）
   static const int userCacheMinutes = 43200; // 用户信息缓存30天（30*24*60=43200分钟）
+  static const int worksCacheMinutes = 120; // 作业缓存2小时（120分钟）
 
   // 通知状态相关 keys
   static const String _keyReadNotificationIds = 'read_notification_ids';
   static const String _keyLastUpdateVersion =
       'last_update_version'; // 上次显示的更新版本
+
+  // 作业通知开关 key
+  static const String _keyWorkNotificationEnabled = 'work_notification_enabled';
 
   // 天气API限流相关 keys
   static const String _keyWeatherApiCallTimes = 'weather_api_call_times';
@@ -451,6 +457,61 @@ class AuthStorage {
     await clearScheduleCache();
     await clearGradesCache();
     await clearUserCache();
+    await clearWorksCache();
+  }
+
+  // ==================== 作业缓存 ====================
+
+  /// 保存作业缓存
+  static Future<void> saveWorksCache(String jsonData) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyWorksCache, jsonData);
+    await prefs.setString(
+      _keyWorksCacheTime,
+      DateTime.now().toIso8601String(),
+    );
+  }
+
+  /// 获取作业缓存
+  /// 返回 (缓存数据, 是否有效)
+  static Future<(String?, bool)> getWorksCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_keyWorksCache);
+    final timeStr = prefs.getString(_keyWorksCacheTime);
+
+    if (data == null || timeStr == null) {
+      return (null, false);
+    }
+
+    final cachedAt = DateTime.tryParse(timeStr);
+    if (cachedAt == null) {
+      return (data, false);
+    }
+
+    final isValid =
+        DateTime.now().difference(cachedAt).inMinutes < worksCacheMinutes;
+    return (data, isValid);
+  }
+
+  /// 清除作业缓存
+  static Future<void> clearWorksCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyWorksCache);
+    await prefs.remove(_keyWorksCacheTime);
+  }
+
+  // ==================== 作业通知设置 ====================
+
+  /// 获取作业通知是否启用
+  static Future<bool> isWorkNotificationEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyWorkNotificationEnabled) ?? true; // 默认开启
+  }
+
+  /// 设置作业通知是否启用
+  static Future<void> setWorkNotificationEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyWorkNotificationEnabled, enabled);
   }
 
   // ==================== 成绩缓存 ====================

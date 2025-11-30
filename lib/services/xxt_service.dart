@@ -10,6 +10,7 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../models/xxt_work.dart';
 import 'account_manager.dart';
+import 'auth_storage.dart';
 
 /// 学习通服务
 class XxtService {
@@ -217,7 +218,8 @@ class XxtService {
   }
 
   /// 获取未交作业（使用账号管理器中的学习通账号）
-  Future<XxtWorkResult> getUnfinishedWorks() async {
+  /// [forceRefresh] 是否强制刷新（忽略缓存）
+  Future<XxtWorkResult> getUnfinishedWorks({bool forceRefresh = false}) async {
     // 获取当前活跃账号的学习通配置
     final accountManager = AccountManager();
 
@@ -240,10 +242,60 @@ class XxtService {
       return XxtWorkResult.failure('请先配置学习通账号', needLogin: true);
     }
 
-    return getUnfinishedWorksWithCredentials(
+    // 尝试从缓存加载（如果不是强制刷新）
+    if (!forceRefresh) {
+      final (cacheData, isValid) = await AuthStorage.getWorksCache();
+      if (cacheData != null && isValid) {
+        try {
+          final works = _parseWorksFromCache(cacheData);
+          debugPrint('从缓存加载作业列表: ${works.length} 项');
+          return XxtWorkResult.success(works);
+        } catch (e) {
+          debugPrint('解析作业缓存失败: $e');
+        }
+      }
+    }
+
+    // 从网络获取
+    final result = await getUnfinishedWorksWithCredentials(
       activeAccount.xuexitong!.username,
       activeAccount.xuexitong!.password,
     );
+
+    // 如果成功，保存到缓存
+    if (result.success) {
+      try {
+        final cacheData = _serializeWorksToCache(result.works);
+        await AuthStorage.saveWorksCache(cacheData);
+        debugPrint('作业列表已缓存: ${result.works.length} 项');
+      } catch (e) {
+        debugPrint('保存作业缓存失败: $e');
+      }
+    }
+
+    return result;
+  }
+
+  /// 将作业列表序列化为缓存字符串
+  String _serializeWorksToCache(List<XxtWork> works) {
+    final list = works.map((w) => {
+      'name': w.name,
+      'status': w.status,
+      'remainingTime': w.remainingTime,
+      'courseName': w.courseName,
+    }).toList();
+    return jsonEncode(list);
+  }
+
+  /// 从缓存字符串解析作业列表
+  List<XxtWork> _parseWorksFromCache(String cacheData) {
+    final list = jsonDecode(cacheData) as List;
+    return list.map((item) => XxtWork.fromParsed(
+      name: item['name'] ?? '',
+      status: item['status'] ?? '未提交',
+      remainingTime: item['remainingTime'] ?? '未知',
+      courseName: item['courseName'],
+    )).toList();
   }
 
   /// 使用指定的账号密码获取未交作业

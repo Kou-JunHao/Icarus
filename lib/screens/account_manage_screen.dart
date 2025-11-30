@@ -182,7 +182,7 @@ class _AccountManageScreenState extends State<AccountManageScreen> {
         borderRadius: BorderRadius.circular(16),
         side: isActive
             ? BorderSide(color: colorScheme.primary, width: 2)
-            : BorderSide.none,
+            : BorderSide(color: colorScheme.outlineVariant, width: 1),
       ),
       child: InkWell(
         onTap: isActive ? null : () => _switchAccount(account),

@@ -34,6 +34,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   bool _notificationEnabled = false;
   int _notificationMinutesBefore = 15;
+  bool _workNotificationEnabled = true;
   bool _isAcademicExpanded = false;
 
   @override
@@ -45,10 +46,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   Future<void> _loadNotificationSettings() async {
     final enabled = await NotificationService().isNotificationEnabled();
     final minutes = await NotificationService().getMinutesBefore();
+    final workEnabled = await AuthStorage.isWorkNotificationEnabled();
     if (mounted) {
       setState(() {
         _notificationEnabled = enabled;
         _notificationMinutesBefore = minutes;
+        _workNotificationEnabled = workEnabled;
       });
     }
   }
@@ -1721,7 +1724,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 24),
-              // 通知开关
+              // 课程通知开关
               Card(
                 elevation: 0,
                 color: colorScheme.surfaceContainerLow,
@@ -1766,6 +1769,47 @@ class _ProfileScreenState extends State<ProfileScreen>
                       // 如果关闭了通知，取消所有已安排的通知
                       await notificationService.cancelAllNotifications();
                     }
+                  },
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 作业通知开关
+              Card(
+                elevation: 0,
+                color: colorScheme.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: SwitchListTile(
+                  title: const Text('作业提醒'),
+                  subtitle: const Text('作业截止前发送通知提醒'),
+                  value: _workNotificationEnabled,
+                  onChanged: (value) async {
+                    if (value) {
+                      // 请求通知权限
+                      final granted = await notificationService
+                          .requestPermission();
+                      if (!granted) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('请在系统设置中允许通知权限'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                    }
+
+                    await AuthStorage.setWorkNotificationEnabled(value);
+                    setModalState(() {
+                      _workNotificationEnabled = value;
+                    });
+                    setState(() {});
                   },
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),

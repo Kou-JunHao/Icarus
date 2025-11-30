@@ -58,3 +58,4 @@ app.*.map.json
 *.dmg
 *.app
 
+.github/copilot-instructions.md

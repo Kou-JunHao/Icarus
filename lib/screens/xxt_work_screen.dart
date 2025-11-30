@@ -27,13 +27,13 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
     _loadWorks();
   }
 
-  Future<void> _loadWorks() async {
+  Future<void> _loadWorks({bool forceRefresh = false}) async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final result = await _xxtService.getUnfinishedWorks();
+    final result = await _xxtService.getUnfinishedWorks(forceRefresh: forceRefresh);
 
     if (mounted) {
       setState(() {
@@ -58,7 +58,7 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '刷新',
-            onPressed: _isLoading ? null : _loadWorks,
+            onPressed: _isLoading ? null : () => _loadWorks(forceRefresh: true),
           ),
         ],
       ),
@@ -205,7 +205,7 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
     final pendingCount = urgentWorks.length + normalWorks.length;
 
     return RefreshIndicator(
-      onRefresh: _loadWorks,
+      onRefresh: () => _loadWorks(forceRefresh: true),
       child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
@@ -274,7 +274,7 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
               colorScheme,
               '已超时',
               Icons.error_outline_rounded,
-              Colors.red.shade700,
+              colorScheme.error,
             ),
             const SizedBox(height: 6),
             ...overdueWorks.map(
@@ -343,7 +343,7 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
                 colorScheme,
                 '已超时',
                 overdue.toString(),
-                overdue > 0 ? Colors.red.shade700 : colorScheme.outline,
+                overdue > 0 ? colorScheme.error : colorScheme.outline,
               ),
             ),
           ],
@@ -415,9 +415,10 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
     Color timeColor;
 
     if (isOverdue) {
-      cardColor = Colors.red.shade50;
-      borderColor = Colors.red.shade300;
-      timeColor = Colors.red.shade700;
+      // 使用与即将截止一致的颜色逻辑，兼容深色模式
+      cardColor = colorScheme.errorContainer.withValues(alpha: 0.5);
+      borderColor = colorScheme.error.withValues(alpha: 0.5);
+      timeColor = colorScheme.error;
     } else if (isUrgent) {
       cardColor = colorScheme.errorContainer.withValues(alpha: 0.5);
       borderColor = colorScheme.error.withValues(alpha: 0.5);
@@ -462,13 +463,13 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
                       vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade700,
+                      color: colorScheme.error,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
                       '超时',
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: Colors.white,
+                        color: colorScheme.onError,
                         fontWeight: FontWeight.w600,
                         fontSize: 10,
                       ),
