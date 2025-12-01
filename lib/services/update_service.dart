@@ -824,19 +824,24 @@ class UpdateService {
         // 检查是否超时
         if (DateTime.now().difference(startTime) > maxWaitTime) {
           _updateProgress(
-            DownloadProgress.failed(version: version, error: DownloadError.timeout),
+            DownloadProgress.failed(
+              version: version,
+              error: DownloadError.timeout,
+            ),
           );
           return const DownloadResult.failure(DownloadError.timeout);
         }
 
         // 检查服务是否还在运行
-        final isRunning = await _channel.invokeMethod<bool>('isDownloadServiceRunning') ?? false;
-        
+        final isRunning =
+            await _channel.invokeMethod<bool>('isDownloadServiceRunning') ??
+            false;
+
         // 检查文件是否已下载完成
         final file = File(filePath);
         if (await file.exists()) {
           final downloadedSize = await file.length();
-          
+
           // 更新进度
           _updateProgress(
             DownloadProgress.downloading(
@@ -865,7 +870,10 @@ class UpdateService {
             } else {
               // 服务已停止但文件不完整
               _updateProgress(
-                DownloadProgress.failed(version: version, error: DownloadError.networkError),
+                DownloadProgress.failed(
+                  version: version,
+                  error: DownloadError.networkError,
+                ),
               );
               return const DownloadResult.failure(DownloadError.networkError);
             }
@@ -873,7 +881,10 @@ class UpdateService {
         } else if (!isRunning) {
           // 服务已停止且没有文件
           _updateProgress(
-            DownloadProgress.failed(version: version, error: DownloadError.networkError),
+            DownloadProgress.failed(
+              version: version,
+              error: DownloadError.networkError,
+            ),
           );
           return const DownloadResult.failure(DownloadError.networkError);
         }
@@ -895,103 +906,103 @@ class UpdateService {
     DownloadProgressCallback? onProgress,
     bool showNotification,
   ) async {
-      // 创建取消令牌
-      _currentDownloadToken = CancelToken();
+    // 创建取消令牌
+    _currentDownloadToken = CancelToken();
 
-      // 更新状态为下载中
-      _updateProgress(
-        DownloadProgress.downloading(
-          version: updateInfo.version,
-          received: 0,
-          total: updateInfo.fileSize,
-        ),
+    // 更新状态为下载中
+    _updateProgress(
+      DownloadProgress.downloading(
+        version: updateInfo.version,
+        received: 0,
+        total: updateInfo.fileSize,
+      ),
+    );
+
+    // 显示初始通知
+    if (showNotification) {
+      await _showDownloadNotification(
+        0,
+        100,
+        '正在下载更新 v${updateInfo.version}',
+        '准备下载...',
       );
+    }
 
-      // 显示初始通知
-      if (showNotification) {
-        await _showDownloadNotification(
-          0,
-          100,
-          '正在下载更新 v${updateInfo.version}',
-          '准备下载...',
-        );
-      }
-
-      // 下载文件
-      final error = await _downloadFileWithError(
-        downloadUrl,
-        filePath,
-        updateInfo.fileSize,
-        (received, total) {
-          // 更新进度流
-          _updateProgress(
-            DownloadProgress.downloading(
-              version: updateInfo.version,
-              received: received,
-              total: total,
-            ),
-          );
-          onProgress?.call(received, total);
-          // 更新通知栏进度
-          if (showNotification) {
-            final percent = total > 0 ? (received * 100 ~/ total) : 0;
-            final receivedMB = (received / 1024 / 1024).toStringAsFixed(1);
-            final totalMB = (total / 1024 / 1024).toStringAsFixed(1);
-            _updateDownloadNotification(
-              percent,
-              100,
-              '正在下载更新 v${updateInfo.version}',
-              '$receivedMB MB / $totalMB MB ($percent%)',
-            );
-          }
-        },
-      );
-
-      _currentDownloadToken = null;
-
-      if (error != null) {
-        if (showNotification) {
-          await _cancelDownloadNotification();
-        }
+    // 下载文件
+    final error = await _downloadFileWithError(
+      downloadUrl,
+      filePath,
+      updateInfo.fileSize,
+      (received, total) {
+        // 更新进度流
         _updateProgress(
-          DownloadProgress.failed(version: updateInfo.version, error: error),
+          DownloadProgress.downloading(
+            version: updateInfo.version,
+            received: received,
+            total: total,
+          ),
         );
-        return DownloadResult.failure(error);
-      }
-
-      // 验证文件
-      if (await File(filePath).exists()) {
-        final downloadedSize = await File(filePath).length();
-        if (downloadedSize > 0) {
-          // 显示完成通知
-          if (showNotification) {
-            await _completeDownloadNotification(
-              filePath,
-              '下载完成',
-              '点击安装 Icarus v${updateInfo.version}',
-            );
-          }
-          _updateProgress(
-            DownloadProgress.completed(
-              version: updateInfo.version,
-              filePath: filePath,
-              total: updateInfo.fileSize,
-            ),
+        onProgress?.call(received, total);
+        // 更新通知栏进度
+        if (showNotification) {
+          final percent = total > 0 ? (received * 100 ~/ total) : 0;
+          final receivedMB = (received / 1024 / 1024).toStringAsFixed(1);
+          final totalMB = (total / 1024 / 1024).toStringAsFixed(1);
+          _updateDownloadNotification(
+            percent,
+            100,
+            '正在下载更新 v${updateInfo.version}',
+            '$receivedMB MB / $totalMB MB ($percent%)',
           );
-          return DownloadResult.success(filePath);
         }
-      }
+      },
+    );
 
+    _currentDownloadToken = null;
+
+    if (error != null) {
       if (showNotification) {
         await _cancelDownloadNotification();
       }
       _updateProgress(
-        DownloadProgress.failed(
-          version: updateInfo.version,
-          error: DownloadError.writeError,
-        ),
+        DownloadProgress.failed(version: updateInfo.version, error: error),
       );
-      return const DownloadResult.failure(DownloadError.writeError);
+      return DownloadResult.failure(error);
+    }
+
+    // 验证文件
+    if (await File(filePath).exists()) {
+      final downloadedSize = await File(filePath).length();
+      if (downloadedSize > 0) {
+        // 显示完成通知
+        if (showNotification) {
+          await _completeDownloadNotification(
+            filePath,
+            '下载完成',
+            '点击安装 Icarus v${updateInfo.version}',
+          );
+        }
+        _updateProgress(
+          DownloadProgress.completed(
+            version: updateInfo.version,
+            filePath: filePath,
+            total: updateInfo.fileSize,
+          ),
+        );
+        return DownloadResult.success(filePath);
+      }
+    }
+
+    if (showNotification) {
+      await _cancelDownloadNotification();
+    }
+    _updateProgress(
+      DownloadProgress.failed(
+        version: updateInfo.version,
+        error: DownloadError.writeError,
+      ),
+    );
+    return const DownloadResult.failure(DownloadError.writeError);
   }
 
   /// 下载文件，返回错误类型（null 表示成功）
@@ -1084,14 +1095,14 @@ class UpdateService {
   /// 取消下载
   void cancelDownload() {
     final version = _currentProgress.version;
-    
+
     // 取消 Dio 下载
     _currentDownloadToken?.cancel('用户取消下载');
     _currentDownloadToken = null;
-    
+
     // 取消原生下载服务
     _cancelNativeDownloadService();
-    
+
     // 更新状态
     if (version != null && version.isNotEmpty) {
       _updateProgress(DownloadProgress.cancelled(version: version));
