@@ -119,11 +119,103 @@ class MainActivity : FlutterActivity() {
                     requestNotificationPermission()
                     result.success(true)
                 }
+                "startDownloadService" -> {
+                    val url = call.argument<String>("url")
+                    val filePath = call.argument<String>("filePath")
+                    val version = call.argument<String>("version") ?: "未知"
+                    val fileSize = call.argument<Number>("fileSize")?.toLong() ?: 0L
+                    
+                    if (url != null && filePath != null) {
+                        startDownloadService(url, filePath, version, fileSize)
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "URL and filePath are required", null)
+                    }
+                }
+                "cancelDownloadService" -> {
+                    cancelDownloadService()
+                    result.success(true)
+                }
+                "isDownloadServiceRunning" -> {
+                    result.success(DownloadService.isRunning)
+                }
                 else -> {
                     result.notImplemented()
                 }
             }
         }
+        
+        // 注册下载服务广播接收器
+        registerDownloadServiceReceiver()
+    }
+    
+    private var downloadServiceReceiver: BroadcastReceiver? = null
+    private var flutterMethodChannel: MethodChannel? = null
+    
+    private fun registerDownloadServiceReceiver() {
+        downloadServiceReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    DownloadService.BROADCAST_DOWNLOAD_PROGRESS -> {
+                        val progress = intent.getLongExtra(DownloadService.EXTRA_PROGRESS, 0)
+                        val total = intent.getLongExtra(DownloadService.EXTRA_TOTAL, 0)
+                        // 通过 EventChannel 或存储到 SharedPreferences 传递给 Flutter
+                        Log.d(TAG, "Download progress: $progress / $total")
+                    }
+                    DownloadService.BROADCAST_DOWNLOAD_COMPLETE -> {
+                        val filePath = intent.getStringExtra(DownloadService.EXTRA_FILE_PATH)
+                        Log.d(TAG, "Download complete: $filePath")
+                    }
+                    DownloadService.BROADCAST_DOWNLOAD_ERROR -> {
+                        val error = intent.getStringExtra(DownloadService.EXTRA_ERROR)
+                        Log.d(TAG, "Download error: $error")
+                    }
+                }
+            }
+        }
+        
+        val filter = IntentFilter().apply {
+            addAction(DownloadService.BROADCAST_DOWNLOAD_PROGRESS)
+            addAction(DownloadService.BROADCAST_DOWNLOAD_COMPLETE)
+            addAction(DownloadService.BROADCAST_DOWNLOAD_ERROR)
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadServiceReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(downloadServiceReceiver, filter)
+        }
+    }
+    
+    /**
+     * 启动下载服务
+     */
+    private fun startDownloadService(url: String, filePath: String, version: String, fileSize: Long) {
+        val intent = Intent(this, DownloadService::class.java).apply {
+            action = DownloadService.ACTION_START_DOWNLOAD
+            putExtra(DownloadService.EXTRA_URL, url)
+            putExtra(DownloadService.EXTRA_FILE_PATH, filePath)
+            putExtra(DownloadService.EXTRA_VERSION, version)
+            putExtra(DownloadService.EXTRA_FILE_SIZE, fileSize)
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        Log.d(TAG, "Download service started")
+    }
+    
+    /**
+     * 取消下载服务
+     */
+    private fun cancelDownloadService() {
+        val intent = Intent(this, DownloadService::class.java).apply {
+            action = DownloadService.ACTION_CANCEL_DOWNLOAD
+        }
+        startService(intent)
+        Log.d(TAG, "Download service cancelled")
     }
 
     /**
@@ -168,6 +260,13 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
         notificationDismissedReceiver?.let {
             unregisterReceiver(it)
+        }
+        downloadServiceReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to unregister download service receiver", e)
+            }
         }
     }
 

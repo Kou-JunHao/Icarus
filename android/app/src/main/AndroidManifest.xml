@@ -17,6 +17,11 @@
     <!-- 应用更新安装权限 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     
+    <!-- 前台服务权限（后台下载） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    
     <!-- 存储权限（Android 9 及以下写入公共 Download 目录需要） -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
@@ -96,6 +101,12 @@
             android:name=".WorksWidgetService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- APK下载前台服务 -->
+        <service
+            android:name=".DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- 开机启动接收器 -->
         <receiver

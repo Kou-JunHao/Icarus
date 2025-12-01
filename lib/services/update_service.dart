@@ -656,10 +656,12 @@ class UpdateService {
   /// 下载更新
   /// 返回下载结果，包含文件路径或错误信息
   /// [showNotification] 是否显示通知栏进度（支持后台下载）
+  /// [useNativeService] 是否使用原生下载服务（支持后台下载，不会被系统中断）
   Future<DownloadResult> downloadUpdateWithResult(
     UpdateInfo updateInfo, {
     DownloadProgressCallback? onProgress,
     bool showNotification = true,
+    bool useNativeService = true,
   }) async {
     if (!Platform.isAndroid) {
       return const DownloadResult.failure(DownloadError.unknown);
@@ -728,9 +730,6 @@ class UpdateService {
         await dir.create(recursive: true);
       }
 
-      // 创建取消令牌
-      _currentDownloadToken = CancelToken();
-
       // 获取镜像源转换后的URL
       String downloadUrl = updateInfo.downloadUrl;
       if (_mirrors.isEmpty) {
@@ -740,6 +739,164 @@ class UpdateService {
       if (mirror != null && mirror.id != 'github') {
         downloadUrl = mirror.transformUrl(updateInfo.downloadUrl);
       }
+
+      // 使用原生下载服务（推荐，支持后台下载）
+      if (useNativeService) {
+        return _downloadWithNativeService(
+          downloadUrl,
+          filePath,
+          updateInfo.version,
+          updateInfo.fileSize,
+          onProgress,
+        );
+      }
+
+      // 使用 Dart Dio 下载（应用进入后台可能被中断）
+      return _downloadWithDio(
+        downloadUrl,
+        filePath,
+        updateInfo,
+        onProgress,
+        showNotification,
+      );
+    } on FileSystemException catch (e) {
+      _updateProgress(
+        DownloadProgress.failed(
+          version: updateInfo.version,
+          error: DownloadError.storageError,
+        ),
+      );
+      debugPrint('存储错误: $e');
+      return const DownloadResult.failure(DownloadError.storageError);
+    } catch (e) {
+      _currentDownloadToken = null;
+      await _cancelDownloadNotification();
+      if (e is DioException && e.type == DioExceptionType.cancel) {
+        _updateProgress(
+          DownloadProgress.cancelled(version: updateInfo.version),
+        );
+        return const DownloadResult.failure(DownloadError.cancelled);
+      }
+      _updateProgress(
+        DownloadProgress.failed(
+          version: updateInfo.version,
+          error: DownloadError.unknown,
+        ),
+      );
+      return const DownloadResult.failure(DownloadError.unknown);
+    }
+  }
+
+  /// 使用原生服务下载（支持后台下载）
+  Future<DownloadResult> _downloadWithNativeService(
+    String url,
+    String filePath,
+    String version,
+    int fileSize,
+    DownloadProgressCallback? onProgress,
+  ) async {
+    try {
+      // 更新状态为下载中
+      _updateProgress(
+        DownloadProgress.downloading(
+          version: version,
+          received: 0,
+          total: fileSize,
+        ),
+      );
+
+      // 启动原生下载服务
+      await _channel.invokeMethod('startDownloadService', {
+        'url': url,
+        'filePath': filePath,
+        'version': version,
+        'fileSize': fileSize,
+      });
+
+      // 轮询检查下载状态
+      const checkInterval = Duration(milliseconds: 500);
+      const maxWaitTime = Duration(minutes: 30);
+      final startTime = DateTime.now();
+
+      while (true) {
+        await Future.delayed(checkInterval);
+
+        // 检查是否超时
+        if (DateTime.now().difference(startTime) > maxWaitTime) {
+          _updateProgress(
+            DownloadProgress.failed(version: version, error: DownloadError.timeout),
+          );
+          return const DownloadResult.failure(DownloadError.timeout);
+        }
+
+        // 检查服务是否还在运行
+        final isRunning = await _channel.invokeMethod<bool>('isDownloadServiceRunning') ?? false;
+        
+        // 检查文件是否已下载完成
+        final file = File(filePath);
+        if (await file.exists()) {
+          final downloadedSize = await file.length();
+          
+          // 更新进度
+          _updateProgress(
+            DownloadProgress.downloading(
+              version: version,
+              received: downloadedSize,
+              total: fileSize,
+            ),
+          );
+          onProgress?.call(downloadedSize, fileSize);
+
+          // 检查是否下载完成
+          final sizeDiff = (downloadedSize - fileSize).abs();
+          final threshold = fileSize * 0.01; // 1% 误差容忍
+
+          if (!isRunning && downloadedSize > 0) {
+            if (sizeDiff < threshold) {
+              // 下载完成
+              _updateProgress(
+                DownloadProgress.completed(
+                  version: version,
+                  filePath: filePath,
+                  total: fileSize,
+                ),
+              );
+              return DownloadResult.success(filePath);
+            } else {
+              // 服务已停止但文件不完整
+              _updateProgress(
+                DownloadProgress.failed(version: version, error: DownloadError.networkError),
+              );
+              return const DownloadResult.failure(DownloadError.networkError);
+            }
+          }
+        } else if (!isRunning) {
+          // 服务已停止且没有文件
+          _updateProgress(
+            DownloadProgress.failed(version: version, error: DownloadError.networkError),
+          );
+          return const DownloadResult.failure(DownloadError.networkError);
+        }
+      }
+    } catch (e) {
+      debugPrint('原生下载服务错误: $e');
+      _updateProgress(
+        DownloadProgress.failed(version: version, error: DownloadError.unknown),
+      );
+      return const DownloadResult.failure(DownloadError.unknown);
+    }
+  }
+
+  /// 使用 Dart Dio 下载（旧方式，应用进入后台可能被中断）
+  Future<DownloadResult> _downloadWithDio(
+    String downloadUrl,
+    String filePath,
+    UpdateInfo updateInfo,
+    DownloadProgressCallback? onProgress,
+    bool showNotification,
+  ) async {
+      // 创建取消令牌
+      _currentDownloadToken = CancelToken();
 
       // 更新状态为下载中
       _updateProgress(
@@ -835,33 +992,6 @@ class UpdateService {
         ),
       );
       return const DownloadResult.failure(DownloadError.writeError);
-    } on FileSystemException {
-      _currentDownloadToken = null;
-      await _cancelDownloadNotification();
-      _updateProgress(
-        DownloadProgress.failed(
-          version: updateInfo.version,
-          error: DownloadError.storageError,
-        ),
-      );
-      return const DownloadResult.failure(DownloadError.storageError);
-    } catch (e) {
-      _currentDownloadToken = null;
-      await _cancelDownloadNotification();
-      if (e is DioException && e.type == DioExceptionType.cancel) {
-        _updateProgress(
-          DownloadProgress.cancelled(version: updateInfo.version),
-        );
-        return const DownloadResult.failure(DownloadError.cancelled);
-      }
-      _updateProgress(
-        DownloadProgress.failed(
-          version: updateInfo.version,
-          error: DownloadError.unknown,
-        ),
-      );
-      return const DownloadResult.failure(DownloadError.unknown);
-    }
   }
 
   /// 下载文件，返回错误类型（null 表示成功）
@@ -954,14 +1084,28 @@ class UpdateService {
   /// 取消下载
   void cancelDownload() {
     final version = _currentProgress.version;
+    
+    // 取消 Dio 下载
     _currentDownloadToken?.cancel('用户取消下载');
     _currentDownloadToken = null;
+    
+    // 取消原生下载服务
+    _cancelNativeDownloadService();
+    
     // 更新状态
     if (version != null && version.isNotEmpty) {
       _updateProgress(DownloadProgress.cancelled(version: version));
     }
     // 取消通知
     _cancelDownloadNotification();
+  }
+
+  /// 取消原生下载服务
+  Future<void> _cancelNativeDownloadService() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod('cancelDownloadService');
+    } catch (_) {}
   }
 
   /// 重置下载状态
