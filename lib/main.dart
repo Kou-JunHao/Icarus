@@ -12,8 +12,8 @@ void main() async {
   // 初始化版本信息
   await UpdateService.initVersionInfo();
 
-  // 清理旧的更新安装包（在后台执行，不阻塞启动）
-  UpdateService().clearDownloadCache();
+  // 注意：不再在启动时自动清理 APK，避免清理用户刚下载但还未安装的更新包
+  // APK 会在用户点击安装后自动清理，或在应用更新成功后清理旧版本
 
   // 初始化主题服务
   await ThemeService().init();

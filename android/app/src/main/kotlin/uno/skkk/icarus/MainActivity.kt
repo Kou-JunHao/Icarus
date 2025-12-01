@@ -139,6 +139,34 @@ class MainActivity : FlutterActivity() {
                 "isDownloadServiceRunning" -> {
                     result.success(DownloadService.isRunning)
                 }
+                "getLastDownloadError" -> {
+                    // 返回最后的下载错误信息
+                    if (lastDownloadErrorType != null) {
+                        result.success(mapOf(
+                            "error" to lastDownloadError,
+                            "errorType" to lastDownloadErrorType
+                        ))
+                        // 返回后清除错误状态
+                        lastDownloadError = null
+                        lastDownloadErrorType = null
+                    } else {
+                        result.success(null)
+                    }
+                }
+                "isDownloadCompleted" -> {
+                    // 检查下载是否成功完成
+                    if (downloadCompleted) {
+                        result.success(mapOf(
+                            "completed" to true,
+                            "filePath" to completedFilePath
+                        ))
+                        // 返回后清除状态
+                        downloadCompleted = false
+                        completedFilePath = null
+                    } else {
+                        result.success(null)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -152,6 +180,12 @@ class MainActivity : FlutterActivity() {
     private var downloadServiceReceiver: BroadcastReceiver? = null
     private var flutterMethodChannel: MethodChannel? = null
     
+    // 存储最后的下载状态信息
+    private var lastDownloadError: String? = null
+    private var lastDownloadErrorType: String? = null
+    private var downloadCompleted: Boolean = false
+    private var completedFilePath: String? = null
+    
     private fun registerDownloadServiceReceiver() {
         downloadServiceReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -159,16 +193,28 @@ class MainActivity : FlutterActivity() {
                     DownloadService.BROADCAST_DOWNLOAD_PROGRESS -> {
                         val progress = intent.getLongExtra(DownloadService.EXTRA_PROGRESS, 0)
                         val total = intent.getLongExtra(DownloadService.EXTRA_TOTAL, 0)
-                        // 通过 EventChannel 或存储到 SharedPreferences 传递给 Flutter
+                        // 清除错误状态
+                        lastDownloadError = null
+                        lastDownloadErrorType = null
+                        downloadCompleted = false
                         Log.d(TAG, "Download progress: $progress / $total")
                     }
                     DownloadService.BROADCAST_DOWNLOAD_COMPLETE -> {
                         val filePath = intent.getStringExtra(DownloadService.EXTRA_FILE_PATH)
+                        // 标记下载完成
+                        downloadCompleted = true
+                        completedFilePath = filePath
+                        lastDownloadError = null
+                        lastDownloadErrorType = null
                         Log.d(TAG, "Download complete: $filePath")
                     }
                     DownloadService.BROADCAST_DOWNLOAD_ERROR -> {
                         val error = intent.getStringExtra(DownloadService.EXTRA_ERROR)
-                        Log.d(TAG, "Download error: $error")
+                        val errorType = intent.getStringExtra(DownloadService.EXTRA_ERROR_TYPE)
+                        // 存储错误信息以供 Flutter 查询
+                        lastDownloadError = error
+                        lastDownloadErrorType = errorType
+                        Log.d(TAG, "Download error: $error, type: $errorType")
                     }
                 }
             }

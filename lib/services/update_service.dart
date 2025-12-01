@@ -334,6 +334,7 @@ class UpdateService {
   static const String _keyLastCheckTime = 'update_last_check_time';
   static const String _keyCustomMirrors = 'update_custom_mirrors';
   static const String _keySelectedMirror = 'update_selected_mirror';
+  static const String _keyLastDownloadedVersion = 'update_last_downloaded_version';
 
   /// 内置镜像源列表
   static final List<MirrorSource> _builtinMirrors = [
@@ -597,6 +598,10 @@ class UpdateService {
   /// 返回 null 表示没有更新或已跳过
   Future<UpdateInfo?> checkForUpdate({bool ignoreSkipped = false}) async {
     try {
+      // 检查是否需要清理旧的 APK 文件
+      // 如果上次下载的版本与当前运行版本一致，说明更新已成功安装
+      await _cleanupOldApkIfNeeded();
+
       final response = await _dio.get(
         'https://api.github.com/repos/$_owner/$_repo/releases/latest',
       );
@@ -832,6 +837,23 @@ class UpdateService {
           return const DownloadResult.failure(DownloadError.timeout);
         }
 
+        // 优先检查原生端是否已标记下载完成
+        final completedResult = await _checkDownloadCompleted();
+        if (completedResult != null) {
+          // 使用原生端返回的路径，如果为空则使用传入的 filePath
+          final actualPath = completedResult.isNotEmpty ? completedResult : filePath;
+          // 保存已下载的版本信息，用于后续清理
+          await _saveLastDownloadedVersion(version);
+          _updateProgress(
+            DownloadProgress.completed(
+              version: version,
+              filePath: actualPath,
+              total: fileSize,
+            ),
+          );
+          return DownloadResult.success(actualPath);
+        }
+
         // 检查服务是否还在运行
         final isRunning =
             await _channel.invokeMethod<bool>('isDownloadServiceRunning') ??
@@ -858,7 +880,8 @@ class UpdateService {
 
           if (!isRunning && downloadedSize > 0) {
             if (sizeDiff < threshold) {
-              // 下载完成
+              // 下载完成，保存已下载的版本信息
+              await _saveLastDownloadedVersion(version);
               _updateProgress(
                 DownloadProgress.completed(
                   version: version,
@@ -868,25 +891,27 @@ class UpdateService {
               );
               return DownloadResult.success(filePath);
             } else {
-              // 服务已停止但文件不完整
+              // 服务已停止但文件不完整，查询具体错误类型
+              final error = await _getLastDownloadError();
               _updateProgress(
                 DownloadProgress.failed(
                   version: version,
-                  error: DownloadError.networkError,
+                  error: error,
                 ),
               );
-              return const DownloadResult.failure(DownloadError.networkError);
+              return DownloadResult.failure(error);
             }
           }
         } else if (!isRunning) {
-          // 服务已停止且没有文件
+          // 服务已停止且没有文件，查询具体错误类型
+          final error = await _getLastDownloadError();
           _updateProgress(
             DownloadProgress.failed(
               version: version,
-              error: DownloadError.networkError,
+              error: error,
             ),
           );
-          return const DownloadResult.failure(DownloadError.networkError);
+          return DownloadResult.failure(error);
         }
       }
     } catch (e) {
@@ -1119,6 +1144,62 @@ class UpdateService {
     } catch (_) {}
   }
 
+  /// 检查原生端是否已标记下载完成
+  /// 返回文件路径表示完成，返回 null 表示未完成
+  Future<String?> _checkDownloadCompleted() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'isDownloadCompleted',
+      );
+      if (result != null && result['completed'] == true) {
+        return result['filePath'] as String?;
+      }
+    } catch (e) {
+      debugPrint('检查下载完成状态失败: $e');
+    }
+    return null;
+  }
+
+  /// 从原生端获取最后的下载错误类型
+  Future<DownloadError> _getLastDownloadError() async {
+    if (!Platform.isAndroid) return DownloadError.unknown;
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'getLastDownloadError',
+      );
+      if (result != null) {
+        final errorType = result['errorType'] as String?;
+        debugPrint('原生下载错误类型: $errorType');
+        return _parseNativeErrorType(errorType);
+      }
+    } catch (e) {
+      debugPrint('获取原生下载错误失败: $e');
+    }
+    return DownloadError.unknown;
+  }
+
+  /// 将原生错误类型字符串转换为 DownloadError 枚举
+  DownloadError _parseNativeErrorType(String? errorType) {
+    switch (errorType) {
+      case 'network_error':
+        return DownloadError.networkError;
+      case 'timeout':
+        return DownloadError.timeout;
+      case 'server_error':
+        return DownloadError.serverError;
+      case 'storage_error':
+        return DownloadError.storageError;
+      case 'write_error':
+        return DownloadError.writeError;
+      case 'cancelled':
+        return DownloadError.cancelled;
+      case 'unknown':
+      default:
+        return DownloadError.unknown;
+    }
+  }
+
   /// 重置下载状态
   void resetDownloadState() {
     _updateProgress(DownloadProgress.idle());
@@ -1233,6 +1314,45 @@ class UpdateService {
   Future<String?> _getSkippedVersion() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keySkippedVersion);
+  }
+
+  /// 保存已下载的版本号
+  Future<void> _saveLastDownloadedVersion(String version) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyLastDownloadedVersion, version);
+  }
+
+  /// 获取已下载的版本号
+  Future<String?> _getLastDownloadedVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyLastDownloadedVersion);
+  }
+
+  /// 清除已下载版本记录
+  Future<void> _clearLastDownloadedVersion() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyLastDownloadedVersion);
+  }
+
+  /// 检查并清理旧的 APK 文件
+  /// 只有当上次下载的版本与当前运行版本一致时才清理
+  /// （说明用户已经成功安装了更新）
+  Future<void> _cleanupOldApkIfNeeded() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      final lastDownloadedVersion = await _getLastDownloadedVersion();
+      if (lastDownloadedVersion == null) return;
+
+      // 如果当前版本 >= 上次下载的版本，说明更新已安装成功
+      if (!_isNewerVersion(lastDownloadedVersion, currentVersion)) {
+        debugPrint('检测到更新已安装成功，清理旧的 APK 文件');
+        await clearDownloadCache();
+        await _clearLastDownloadedVersion();
+      }
+    } catch (e) {
+      debugPrint('清理旧 APK 失败: $e');
+    }
   }
 
   /// 比较版本号，返回 true 表示 newVersion 更新

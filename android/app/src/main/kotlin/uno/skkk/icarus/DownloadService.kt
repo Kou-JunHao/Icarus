@@ -14,10 +14,17 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLException
 
 /**
  * APK 下载前台服务
@@ -47,6 +54,16 @@ class DownloadService : Service() {
         const val EXTRA_PROGRESS = "progress"
         const val EXTRA_TOTAL = "total"
         const val EXTRA_ERROR = "error"
+        const val EXTRA_ERROR_TYPE = "error_type"
+        
+        // 错误类型常量（与 Flutter 端 DownloadError 枚举对应）
+        const val ERROR_TYPE_NETWORK = "network_error"
+        const val ERROR_TYPE_TIMEOUT = "timeout"
+        const val ERROR_TYPE_SERVER = "server_error"
+        const val ERROR_TYPE_STORAGE = "storage_error"
+        const val ERROR_TYPE_WRITE = "write_error"
+        const val ERROR_TYPE_CANCELLED = "cancelled"
+        const val ERROR_TYPE_UNKNOWN = "unknown"
         
         @Volatile
         var isRunning = false
@@ -61,10 +78,14 @@ class DownloadService : Service() {
     private var currentFilePath: String? = null
     private var currentVersion: String? = null
 
+    // 标记下载是否已成功完成
+    private var downloadSuccessful = false
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         isRunning = true
+        downloadSuccessful = false
         Log.d(TAG, "DownloadService created")
     }
 
@@ -99,10 +120,13 @@ class DownloadService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
-        cancelDownload()
+        // 只有在下载未成功完成时才清理文件
+        if (!downloadSuccessful) {
+            cancelDownload()
+        }
         releaseWakeLock()
         serviceScope.cancel()
-        Log.d(TAG, "DownloadService destroyed")
+        Log.d(TAG, "DownloadService destroyed, successful: $downloadSuccessful")
     }
 
     private fun createNotificationChannel() {
@@ -204,6 +228,7 @@ class DownloadService : Service() {
         downloadJob?.cancel()
         
         downloadJob = serviceScope.launch {
+            var connection: HttpURLConnection? = null
             try {
                 Log.d(TAG, "Starting download: $url -> $filePath")
                 
@@ -213,21 +238,64 @@ class DownloadService : Service() {
                     file.delete()
                 }
 
-                val connection = URL(url).openConnection() as HttpURLConnection
-                connection.apply {
-                    requestMethod = "GET"
-                    connectTimeout = 60000
-                    readTimeout = 60000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36")
-                    setRequestProperty("Accept", "*/*")
-                    instanceFollowRedirects = true
-                }
-
-                connection.connect()
+                // 处理重定向
+                var currentUrl = url
+                var redirectCount = 0
+                val maxRedirects = 10
                 
-                val responseCode = connection.responseCode
-                if (responseCode != HttpURLConnection.HTTP_OK) {
-                    throw Exception("HTTP error: $responseCode")
+                while (redirectCount < maxRedirects) {
+                    val urlObj = URL(currentUrl)
+                    connection = urlObj.openConnection() as HttpURLConnection
+                    
+                    // 配置 SSL（如果是 HTTPS）
+                    if (connection is HttpsURLConnection) {
+                        val sslContext = SSLContext.getInstance("TLS")
+                        sslContext.init(null, null, null)
+                        connection.sslSocketFactory = sslContext.socketFactory
+                    }
+                    
+                    connection.apply {
+                        requestMethod = "GET"
+                        connectTimeout = 60000
+                        readTimeout = 120000
+                        instanceFollowRedirects = false // 手动处理重定向
+                        setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+                        setRequestProperty("Accept", "*/*")
+                        setRequestProperty("Accept-Encoding", "identity") // 不使用压缩
+                        setRequestProperty("Connection", "keep-alive")
+                    }
+                    
+                    connection.connect()
+                    
+                    val responseCode = connection.responseCode
+                    Log.d(TAG, "Response code: $responseCode for $currentUrl")
+                    
+                    // 处理重定向
+                    if (responseCode in 301..308) {
+                        val location = connection.getHeaderField("Location")
+                        if (location != null) {
+                            connection.disconnect()
+                            currentUrl = if (location.startsWith("http")) {
+                                location
+                            } else {
+                                // 相对 URL
+                                URL(URL(currentUrl), location).toString()
+                            }
+                            Log.d(TAG, "Redirecting to: $currentUrl")
+                            redirectCount++
+                            continue
+                        }
+                    }
+                    
+                    if (responseCode != HttpURLConnection.HTTP_OK) {
+                        throw Exception("HTTP error: $responseCode")
+                    }
+                    
+                    break
+                }
+                
+                if (connection == null) {
+                    throw Exception("Failed to establish connection")
                 }
 
                 val total = if (connection.contentLength > 0) {
@@ -235,12 +303,15 @@ class DownloadService : Service() {
                 } else {
                     expectedSize
                 }
+                
+                Log.d(TAG, "Content length: $total")
 
                 var received = 0L
                 val buffer = ByteArray(8192)
                 var lastProgressUpdate = 0L
+                var lastNotificationUpdate = 0L
 
-                connection.inputStream.use { input ->
+                BufferedInputStream(connection.inputStream, 8192).use { input ->
                     FileOutputStream(file).use { output ->
                         var bytesRead: Int
                         while (input.read(buffer).also { bytesRead = it } != -1) {
@@ -251,11 +322,10 @@ class DownloadService : Service() {
                             output.write(buffer, 0, bytesRead)
                             received += bytesRead
 
-                            // 每100ms或每1%更新一次进度
                             val now = System.currentTimeMillis()
-                            if (now - lastProgressUpdate > 100 || 
-                                (total > 0 && received * 100 / total != (received - bytesRead) * 100 / total)) {
-                                lastProgressUpdate = now
+                            // 每500ms更新一次通知，避免过于频繁
+                            if (now - lastNotificationUpdate > 500) {
+                                lastNotificationUpdate = now
                                 
                                 withContext(Dispatchers.Main) {
                                     val percent = if (total > 0) (received * 100 / total).toInt() else 0
@@ -268,19 +338,27 @@ class DownloadService : Service() {
                                         100,
                                         "$receivedMB MB / $totalMB MB ($percent%)"
                                     )
-                                    
-                                    sendProgressBroadcast(received, total)
                                 }
                             }
+                            
+                            // 每100ms发送一次进度广播
+                            if (now - lastProgressUpdate > 100) {
+                                lastProgressUpdate = now
+                                sendProgressBroadcast(received, total)
+                            }
                         }
+                        output.flush()
                     }
                 }
 
                 connection.disconnect()
+                connection = null
 
                 // 验证文件
                 if (file.exists() && file.length() > 0) {
                     Log.d(TAG, "Download complete: ${file.length()} bytes")
+                    // 标记下载成功，防止 onDestroy 时删除文件
+                    downloadSuccessful = true
                     withContext(Dispatchers.Main) {
                         sendCompleteBroadcast(filePath)
                         showCompleteNotification(version, filePath)
@@ -292,15 +370,64 @@ class DownloadService : Service() {
             } catch (e: CancellationException) {
                 Log.d(TAG, "Download cancelled")
                 withContext(Dispatchers.Main) {
-                    sendErrorBroadcast("cancelled")
+                    sendErrorBroadcast("下载已取消", ERROR_TYPE_CANCELLED)
+                }
+            } catch (e: SocketTimeoutException) {
+                Log.e(TAG, "Download timeout", e)
+                withContext(Dispatchers.Main) {
+                    sendErrorBroadcast("连接超时: ${e.message}", ERROR_TYPE_TIMEOUT)
+                    showErrorNotification(version, "连接超时")
+                }
+            } catch (e: UnknownHostException) {
+                Log.e(TAG, "Unknown host", e)
+                withContext(Dispatchers.Main) {
+                    sendErrorBroadcast("无法解析服务器地址: ${e.message}", ERROR_TYPE_NETWORK)
+                    showErrorNotification(version, "网络连接失败")
+                }
+            } catch (e: SSLException) {
+                Log.e(TAG, "SSL error", e)
+                withContext(Dispatchers.Main) {
+                    sendErrorBroadcast("SSL连接错误: ${e.message}", ERROR_TYPE_NETWORK)
+                    showErrorNotification(version, "安全连接失败")
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "IO error", e)
+                val errorType = when {
+                    e.message?.contains("ENOSPC", ignoreCase = true) == true -> ERROR_TYPE_STORAGE
+                    e.message?.contains("No space", ignoreCase = true) == true -> ERROR_TYPE_STORAGE
+                    e.message?.contains("disk full", ignoreCase = true) == true -> ERROR_TYPE_STORAGE
+                    e.message?.contains("Permission denied", ignoreCase = true) == true -> ERROR_TYPE_WRITE
+                    else -> ERROR_TYPE_NETWORK
+                }
+                val errorMessage = when (errorType) {
+                    ERROR_TYPE_STORAGE -> "存储空间不足"
+                    ERROR_TYPE_WRITE -> "文件写入失败"
+                    else -> "网络错误: ${e.message}"
+                }
+                withContext(Dispatchers.Main) {
+                    sendErrorBroadcast(e.message ?: errorMessage, errorType)
+                    showErrorNotification(version, errorMessage)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Download failed", e)
+                val errorType = when {
+                    e.message?.contains("HTTP error: 4", ignoreCase = true) == true -> ERROR_TYPE_SERVER
+                    e.message?.contains("HTTP error: 5", ignoreCase = true) == true -> ERROR_TYPE_SERVER
+                    e.message?.contains("HTTP error:", ignoreCase = true) == true -> ERROR_TYPE_SERVER
+                    e.message?.contains("timeout", ignoreCase = true) == true -> ERROR_TYPE_TIMEOUT
+                    e.message?.contains("connection", ignoreCase = true) == true -> ERROR_TYPE_NETWORK
+                    else -> ERROR_TYPE_UNKNOWN
+                }
                 withContext(Dispatchers.Main) {
-                    sendErrorBroadcast(e.message ?: "unknown")
+                    sendErrorBroadcast(e.message ?: "下载失败", errorType)
                     showErrorNotification(version, e.message ?: "下载失败")
                 }
             } finally {
+                try {
+                    connection?.disconnect()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error disconnecting", e)
+                }
                 withContext(Dispatchers.Main) {
                     stopSelf()
                 }
@@ -324,7 +451,7 @@ class DownloadService : Service() {
             }
         }
         
-        sendErrorBroadcast("cancelled")
+        sendErrorBroadcast("下载已取消", ERROR_TYPE_CANCELLED)
         stopSelf()
     }
 
@@ -343,10 +470,11 @@ class DownloadService : Service() {
         })
     }
 
-    private fun sendErrorBroadcast(error: String) {
+    private fun sendErrorBroadcast(error: String, errorType: String) {
         sendBroadcast(Intent(BROADCAST_DOWNLOAD_ERROR).apply {
             setPackage(packageName)
             putExtra(EXTRA_ERROR, error)
+            putExtra(EXTRA_ERROR_TYPE, errorType)
         })
     }
 
