@@ -63,11 +63,39 @@
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
                 <action android:name="uno.skkk.icarus.WIDGET_REFRESH" />
+                <action android:name="uno.skkk.icarus.ACTION_REFRESH_COURSES" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/today_courses_widget_info" />
         </receiver>
+
+        <!-- 未交作业小组件 -->
+        <receiver
+            android:name=".PendingWorksWidgetProvider"
+            android:exported="true"
+            android:label="@string/works_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="uno.skkk.icarus.WORKS_WIDGET_REFRESH" />
+                <action android:name="uno.skkk.icarus.ACTION_REFRESH_WORKS" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/pending_works_widget_info" />
+        </receiver>
+
+        <!-- 课程小组件列表服务 -->
+        <service
+            android:name=".CoursesWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <!-- 作业小组件列表服务 -->
+        <service
+            android:name=".WorksWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
 
         <!-- 开机启动接收器 -->
         <receiver

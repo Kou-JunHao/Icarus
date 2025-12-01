@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/work_list_item_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_marginBottom="4dp"
+    android:padding="10dp"
+    android:background="@drawable/widget_course_item_bg"
+    android:gravity="center_vertical">
+
+    <!-- 紧急状态图标 -->
+    <ImageView
+        android:id="@+id/work_urgent_icon"
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:src="@drawable/ic_urgent"
+        android:tint="@color/widget_urgent_text"
+        android:contentDescription="紧急"
+        android:visibility="gone" />
+
+    <!-- 作业信息 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="8dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/work_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="作业名称"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/work_course"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="所属课程"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- 剩余时间 -->
+    <TextView
+        android:id="@+id/work_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="剩余时间"
+        android:textColor="@color/widget_text_tertiary"
+        android:textSize="11sp"
+        android:maxLines="1" />
+
+</LinearLayout>

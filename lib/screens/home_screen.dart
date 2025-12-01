@@ -82,6 +82,7 @@ class _HomeScreenState extends State<HomeScreen>
   // 未交作业相关
   List<XxtWork> _allWorks = []; // 所有未交作业（按截止时间排序）
   bool _isLoadingWorks = false;
+  bool _xxtNotConfigured = false; // 学习通未配置
   PageController? _workPageController;
   int _currentWorkIndex = 0;
 
@@ -437,11 +438,22 @@ class _HomeScreenState extends State<HomeScreen>
 
     setState(() {
       _isLoadingWorks = true;
+      _xxtNotConfigured = false;
     });
 
     try {
       final xxtService = XxtService();
       final result = await xxtService.getUnfinishedWorks();
+
+      // 更新作业小组件
+      if (result.success) {
+        await WidgetService.updateWorksWidget(
+          works: result.works,
+          needLogin: false,
+        );
+      } else if (result.needLogin) {
+        await WidgetService.updateWorksWidgetNeedLogin();
+      }
 
       if (mounted && result.success) {
         // 获取所有未超时的作业
@@ -457,12 +469,20 @@ class _HomeScreenState extends State<HomeScreen>
         setState(() {
           _allWorks = works;
           _isLoadingWorks = false;
+          _xxtNotConfigured = false;
           // 重置 PageController 索引
           _currentWorkIndex = 0;
         });
 
         // 安排作业提醒通知
         _scheduleWorkNotifications(result.works);
+      } else if (mounted && result.needLogin) {
+        // 学习通未配置
+        setState(() {
+          _isLoadingWorks = false;
+          _xxtNotConfigured = true;
+          _allWorks = [];
+        });
       } else {
         setState(() {
           _isLoadingWorks = false;
@@ -506,7 +526,8 @@ class _HomeScreenState extends State<HomeScreen>
   /// 安排作业截止提醒通知
   Future<void> _scheduleWorkNotifications(List<XxtWork> works) async {
     // 检查作业通知是否开启
-    final workNotificationEnabled = await AuthStorage.isWorkNotificationEnabled();
+    final workNotificationEnabled =
+        await AuthStorage.isWorkNotificationEnabled();
     if (!workNotificationEnabled) return;
 
     final notificationService = NotificationService();
@@ -2576,6 +2597,63 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    // 学习通未配置状态
+    if (_xxtNotConfigured) {
+      return Card(
+        elevation: 0,
+        color: colorScheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _openXxtWorkScreen,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    Icons.settings_outlined,
+                    size: 20,
+                    color: colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '配置学习通账号',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        '配置后可获取作业信息',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
           ),
         ),
       );

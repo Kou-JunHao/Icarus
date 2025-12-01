@@ -449,6 +449,15 @@ class _AppNavigatorState extends State<AppNavigator>
       if (result is LoginSuccess) {
         debugPrint('后台静默登录成功');
         await AuthStorage.resetSilentLoginFailCount();
+
+        // 确保账号同步到账号管理器（兼容旧版升级的用户）
+        final displayName = _jwxtService.currentUser?.name;
+        await AccountManager().addAccount(
+          username: username,
+          password: password,
+          displayName: displayName,
+          setAsActive: true,
+        );
       } else {
         debugPrint('后台静默登录失败');
         final failCount = await AuthStorage.incrementSilentLoginFailCount();

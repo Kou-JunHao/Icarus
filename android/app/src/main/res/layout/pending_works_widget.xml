@@ -20,22 +20,22 @@
             android:id="@+id/widget_icon"
             android:layout_width="22dp"
             android:layout_height="22dp"
-            android:src="@drawable/ic_schedule"
+            android:src="@drawable/ic_assignment"
             android:tint="@color/widget_accent"
-            android:contentDescription="课程图标" />
+            android:contentDescription="作业图标" />
 
         <TextView
             android:id="@+id/widget_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="今日课程"
+            android:text="未交作业"
             android:textColor="@color/widget_text_primary"
             android:textSize="16sp"
             android:textStyle="bold"
             android:maxLines="1" />
 
-        <!-- 更新时间（在标题和周次之间） -->
+        <!-- 更新时间（在标题和数量之间） -->
         <TextView
             android:id="@+id/widget_update_time"
             android:layout_width="0dp"
@@ -49,10 +49,10 @@
             android:maxLines="1" />
 
         <TextView
-            android:id="@+id/widget_week"
+            android:id="@+id/widget_count"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="第1周"
+            android:text="0 项"
             android:textColor="@color/widget_badge_text"
             android:textSize="11sp"
             android:textStyle="bold"
@@ -61,9 +61,9 @@
             android:paddingVertical="3dp" />
     </LinearLayout>
 
-    <!-- 课程列表（可滑动） -->
+    <!-- 作业列表（可滑动） -->
     <ListView
-        android:id="@+id/courses_list"
+        android:id="@+id/works_list"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -89,16 +89,16 @@
             android:id="@+id/empty_icon"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:src="@drawable/ic_no_class"
-            android:tint="@color/widget_text_hint"
-            android:contentDescription="无课程" />
+            android:src="@drawable/ic_check_circle"
+            android:tint="@color/widget_accent"
+            android:contentDescription="无作业" />
 
         <TextView
             android:id="@+id/empty_title"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="今天没有课程"
+            android:text="没有未交作业"
             android:textColor="@color/widget_text_secondary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -108,14 +108,14 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="好好休息吧 🎉"
+            android:text="太棒了！继续保持 ✨"
             android:textColor="@color/widget_text_hint"
             android:textSize="12sp" />
     </LinearLayout>
 
-    <!-- 加载/初始状态 -->
+    <!-- 需要登录提示 -->
     <LinearLayout
-        android:id="@+id/loading_view"
+        android:id="@+id/login_view"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -126,18 +126,25 @@
         <ImageView
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:src="@drawable/ic_schedule"
+            android:src="@drawable/ic_assignment"
             android:tint="@color/widget_text_hint"
-            android:contentDescription="加载中" />
+            android:contentDescription="登录" />
 
         <TextView
-            android:id="@+id/loading_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="点击加载课程"
+            android:text="请先配置学习通账号"
             android:textColor="@color/widget_text_secondary"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="点击打开应用设置"
+            android:textColor="@color/widget_text_hint"
+            android:textSize="11sp" />
     </LinearLayout>
 
 </LinearLayout>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 紧凑版作业列表项（用于小尺寸小组件） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/work_list_item_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_marginBottom="2dp"
+    android:padding="8dp"
+    android:background="@drawable/widget_course_item_bg"
+    android:gravity="center_vertical">
+
+    <!-- 紧急状态图标（紧凑版更小） -->
+    <ImageView
+        android:id="@+id/work_urgent_icon"
+        android:layout_width="14dp"
+        android:layout_height="14dp"
+        android:src="@drawable/ic_urgent"
+        android:tint="@color/widget_urgent_text"
+        android:contentDescription="紧急"
+        android:visibility="gone" />
+
+    <!-- 作业名称（紧凑版只显示名称） -->
+    <TextView
+        android:id="@+id/work_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="6dp"
+        android:text="作业名称"
+        android:textColor="@color/widget_text_primary"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <!-- 隐藏的课程名（保持ID一致） -->
+    <TextView
+        android:id="@+id/work_course"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <!-- 剩余时间（紧凑版） -->
+    <TextView
+        android:id="@+id/work_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="1天"
+        android:textColor="@color/widget_text_tertiary"
+        android:textSize="10sp"
+        android:maxLines="1" />
+
+</LinearLayout>

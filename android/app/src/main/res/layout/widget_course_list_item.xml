@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/course_list_item_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_marginBottom="4dp"
+    android:padding="10dp"
+    android:background="@drawable/widget_course_item_bg"
+    android:gravity="center_vertical">
+
+    <!-- 时间列 -->
+    <LinearLayout
+        android:layout_width="50dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <TextView
+            android:id="@+id/course_start_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="08:00"
+            android:textColor="@color/widget_accent"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/course_end_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="09:35"
+            android:textColor="@color/widget_text_tertiary"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- 课程信息 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="10dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/course_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="课程名称"
+            android:textColor="@color/widget_text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/course_location"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="教室"
+            android:textColor="@color/widget_text_secondary"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- 节次标签 -->
+    <TextView
+        android:id="@+id/course_section"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="1-2节"
+        android:textColor="@color/widget_badge_text"
+        android:textSize="11sp"
+        android:background="@drawable/widget_section_badge"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="3dp" />
+
+</LinearLayout>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 紧凑版课程列表项（用于小尺寸小组件） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/course_list_item_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_marginBottom="2dp"
+    android:padding="8dp"
+    android:background="@drawable/widget_course_item_bg"
+    android:gravity="center_vertical">
+
+    <!-- 时间（简化显示） -->
+    <TextView
+        android:id="@+id/course_start_time"
+        android:layout_width="40dp"
+        android:layout_height="wrap_content"
+        android:text="08:00"
+        android:textColor="@color/widget_accent"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:gravity="center" />
+
+    <!-- 隐藏的结束时间（保持ID一致） -->
+    <TextView
+        android:id="@+id/course_end_time"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <!-- 课程信息（紧凑版只显示名称） -->
+    <TextView
+        android:id="@+id/course_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="6dp"
+        android:text="课程名称"
+        android:textColor="@color/widget_text_primary"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <!-- 隐藏的教室（保持ID一致） -->
+    <TextView
+        android:id="@+id/course_location"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <!-- 节次标签（紧凑版） -->
+    <TextView
+        android:id="@+id/course_section"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="1-2"
+        android:textColor="@color/widget_badge_text"
+        android:textSize="10sp"
+        android:background="@drawable/widget_section_badge"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="2dp" />
+
+</LinearLayout>

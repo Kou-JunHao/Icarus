@@ -1,5 +1,5 @@
 /// 桌面小组件服务
-/// 管理今日课程小组件的数据更新
+/// 管理今日课程和未交作业小组件的数据更新
 library;
 
 import 'dart:convert';
@@ -7,20 +7,33 @@ import 'package:flutter/foundation.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../models/models.dart';
+import '../models/xxt_work.dart';
 import 'auth_storage.dart';
 
 /// 小组件服务
 class WidgetService {
   // 小组件相关常量
   static const String appGroupId = 'group.uno.skkk.icarus';
+
+  // 今日课程小组件
   static const String androidWidgetName = 'TodayCoursesWidgetProvider';
   static const String iOSWidgetName = 'TodayCoursesWidget';
 
-  // 小组件数据 keys
+  // 未交作业小组件
+  static const String androidWorksWidgetName = 'PendingWorksWidgetProvider';
+  static const String iOSWorksWidgetName = 'PendingWorksWidget';
+
+  // 今日课程小组件数据 keys
   static const String keyTodayCourses = 'today_courses';
   static const String keyCurrentWeek = 'current_week';
   static const String keyLastUpdate = 'last_update';
   static const String keySemester = 'semester';
+
+  // 未交作业小组件数据 keys
+  static const String keyPendingWorks = 'pending_works';
+  static const String keyWorksCount = 'works_count';
+  static const String keyWorksLastUpdate = 'works_last_update';
+  static const String keyWorksNeedLogin = 'works_need_login';
 
   /// 初始化小组件服务
   static Future<void> initialize() async {
@@ -140,6 +153,141 @@ class WidgetService {
     } catch (e) {
       debugPrint('清除小组件数据失败: $e');
     }
+  }
+
+  // ==================== 未交作业小组件 ====================
+
+  /// 更新未交作业小组件数据
+  static Future<void> updateWorksWidget({
+    required List<XxtWork> works,
+    required bool needLogin,
+  }) async {
+    try {
+      final now = DateTime.now();
+
+      // 过滤掉已超时作业，并按剩余时间排序（紧急的在前）
+      final filteredWorks = works.where((w) => !w.isOverdue).toList()
+        ..sort((a, b) {
+          // 紧急作业优先
+          if (a.isUrgent && !b.isUrgent) return -1;
+          if (!a.isUrgent && b.isUrgent) return 1;
+          // 然后按剩余时间排序（解析时间字符串）
+          return _compareRemainingTime(a.remainingTime, b.remainingTime);
+        });
+
+      // 转换为小组件数据格式
+      final worksData = filteredWorks.map((work) {
+        return {
+          'name': work.name,
+          'courseName': work.courseName ?? '',
+          'remainingTime': work.remainingTime,
+          'isUrgent': work.isUrgent,
+          'isOverdue': work.isOverdue,
+        };
+      }).toList();
+
+      // 保存数据到小组件
+      await HomeWidget.saveWidgetData<String>(
+        keyPendingWorks,
+        jsonEncode(worksData),
+      );
+      await HomeWidget.saveWidgetData<int>(keyWorksCount, filteredWorks.length);
+      await HomeWidget.saveWidgetData<String>(
+        keyWorksLastUpdate,
+        now.toIso8601String(),
+      );
+      await HomeWidget.saveWidgetData<bool>(keyWorksNeedLogin, needLogin);
+
+      // 通知小组件更新
+      await HomeWidget.updateWidget(
+        androidName: androidWorksWidgetName,
+        iOSName: iOSWorksWidgetName,
+      );
+
+      debugPrint('作业小组件更新成功: ${filteredWorks.length} 项作业');
+    } catch (e) {
+      debugPrint('作业小组件更新失败: $e');
+    }
+  }
+
+  /// 比较剩余时间字符串
+  static int _compareRemainingTime(String a, String b) {
+    final aMinutes = _parseRemainingTimeToMinutes(a);
+    final bMinutes = _parseRemainingTimeToMinutes(b);
+    return aMinutes.compareTo(bMinutes);
+  }
+
+  /// 将剩余时间字符串解析为分钟数
+  static int _parseRemainingTimeToMinutes(String time) {
+    if (time.isEmpty || time == '未设置截止时间') {
+      return 999999; // 无截止时间放到最后
+    }
+
+    int totalMinutes = 0;
+
+    // 解析天数
+    final daysMatch = RegExp(r'(\d+)\s*天').firstMatch(time);
+    if (daysMatch != null) {
+      totalMinutes += (int.tryParse(daysMatch.group(1) ?? '0') ?? 0) * 24 * 60;
+    }
+
+    // 解析小时数
+    final hoursMatch = RegExp(r'(\d+)\s*小时').firstMatch(time);
+    if (hoursMatch != null) {
+      totalMinutes += (int.tryParse(hoursMatch.group(1) ?? '0') ?? 0) * 60;
+    }
+
+    // 解析分钟数
+    final minutesMatch = RegExp(r'(\d+)\s*分钟?').firstMatch(time);
+    if (minutesMatch != null) {
+      totalMinutes += int.tryParse(minutesMatch.group(1) ?? '0') ?? 0;
+    }
+
+    return totalMinutes;
+  }
+
+  /// 更新作业小组件为需要登录状态
+  static Future<void> updateWorksWidgetNeedLogin() async {
+    try {
+      await HomeWidget.saveWidgetData<String>(keyPendingWorks, '[]');
+      await HomeWidget.saveWidgetData<int>(keyWorksCount, 0);
+      await HomeWidget.saveWidgetData<String>(keyWorksLastUpdate, '');
+      await HomeWidget.saveWidgetData<bool>(keyWorksNeedLogin, true);
+
+      await HomeWidget.updateWidget(
+        androidName: androidWorksWidgetName,
+        iOSName: iOSWorksWidgetName,
+      );
+
+      debugPrint('作业小组件设置为需要登录状态');
+    } catch (e) {
+      debugPrint('更新作业小组件状态失败: $e');
+    }
+  }
+
+  /// 清除作业小组件数据
+  static Future<void> clearWorksWidget() async {
+    try {
+      await HomeWidget.saveWidgetData<String>(keyPendingWorks, '[]');
+      await HomeWidget.saveWidgetData<int>(keyWorksCount, 0);
+      await HomeWidget.saveWidgetData<String>(keyWorksLastUpdate, '');
+      await HomeWidget.saveWidgetData<bool>(keyWorksNeedLogin, true);
+
+      await HomeWidget.updateWidget(
+        androidName: androidWorksWidgetName,
+        iOSName: iOSWorksWidgetName,
+      );
+
+      debugPrint('作业小组件数据已清除');
+    } catch (e) {
+      debugPrint('清除作业小组件数据失败: $e');
+    }
+  }
+
+  /// 清除所有小组件数据
+  static Future<void> clearAllWidgets() async {
+    await clearWidget();
+    await clearWorksWidget();
   }
 
   /// 检查小组件点击事件

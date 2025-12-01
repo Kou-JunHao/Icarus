@@ -14,17 +14,18 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 /**
- * 今日课程小组件 Provider
+ * 未提交作业小组件 Provider
  * 支持莫奈动态取色、响应式布局和列表滑动
  */
-class TodayCoursesWidgetProvider : AppWidgetProvider() {
+class PendingWorksWidgetProvider : AppWidgetProvider() {
 
     companion object {
         private const val PREFS_NAME = "HomeWidgetPreferences"
-        private const val KEY_TODAY_COURSES = "today_courses"
-        private const val KEY_CURRENT_WEEK = "current_week"
-        private const val KEY_LAST_UPDATE = "last_update"
-        const val ACTION_REFRESH = "uno.skkk.icarus.ACTION_REFRESH_COURSES"
+        private const val KEY_PENDING_WORKS = "pending_works"
+        private const val KEY_WORKS_COUNT = "works_count"
+        private const val KEY_WORKS_LAST_UPDATE = "works_last_update"
+        private const val KEY_WORKS_NEED_LOGIN = "works_need_login"
+        const val ACTION_REFRESH = "uno.skkk.icarus.ACTION_REFRESH_WORKS"
     }
 
     override fun onUpdate(
@@ -53,11 +54,11 @@ class TodayCoursesWidgetProvider : AppWidgetProvider() {
         if (intent.action == ACTION_REFRESH || 
             intent.action == AppWidgetManager.ACTION_APPWIDGET_UPDATE) {
             val appWidgetManager = AppWidgetManager.getInstance(context)
-            val componentName = ComponentName(context, TodayCoursesWidgetProvider::class.java)
+            val componentName = ComponentName(context, PendingWorksWidgetProvider::class.java)
             val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
             
             // 通知数据变更
-            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.courses_list)
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, R.id.works_list)
             
             for (appWidgetId in appWidgetIds) {
                 updateAppWidget(context, appWidgetManager, appWidgetId)
@@ -71,7 +72,7 @@ class TodayCoursesWidgetProvider : AppWidgetProvider() {
         appWidgetId: Int
     ) {
         try {
-            val views = RemoteViews(context.packageName, R.layout.today_courses_widget)
+            val views = RemoteViews(context.packageName, R.layout.pending_works_widget)
             
             // 获取小组件尺寸，判断是否使用紧凑模式
             val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
@@ -80,46 +81,48 @@ class TodayCoursesWidgetProvider : AppWidgetProvider() {
             
             // 获取数据
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val coursesJson = prefs.getString(KEY_TODAY_COURSES, null)
-            val currentWeek = prefs.getInt(KEY_CURRENT_WEEK, 1)
-            val lastUpdate = prefs.getString(KEY_LAST_UPDATE, null)
+            val worksJson = prefs.getString(KEY_PENDING_WORKS, null)
+            val worksCount = prefs.getInt(KEY_WORKS_COUNT, 0)
+            val lastUpdate = prefs.getString(KEY_WORKS_LAST_UPDATE, null)
+            val needLogin = prefs.getBoolean(KEY_WORKS_NEED_LOGIN, true)
             
-            // 设置周次
-            views.setTextViewText(R.id.widget_week, "第${currentWeek}周")
+            // 设置作业数量
+            views.setTextViewText(R.id.widget_count, "$worksCount 项")
             
             // 设置更新时间
             val updateTimeText = formatUpdateTime(lastUpdate)
             views.setTextViewText(R.id.widget_update_time, updateTimeText)
             
-            // 检查是否有数据
-            val hasData = coursesJson != null && coursesJson != "[]"
-            val courses = if (hasData) parseCourses(coursesJson) else emptyList()
-            
-            if (coursesJson == null) {
-                // 从未加载过数据，显示加载提示
-                views.setViewVisibility(R.id.courses_list, View.GONE)
+            // 判断显示状态
+            if (needLogin) {
+                // 显示需要登录的提示
+                views.setViewVisibility(R.id.works_list, View.GONE)
                 views.setViewVisibility(R.id.empty_view, View.GONE)
-                views.setViewVisibility(R.id.loading_view, View.VISIBLE)
-                views.setTextViewText(R.id.loading_text, "点击加载课程")
-            } else if (courses.isEmpty()) {
-                // 今天没有课程
-                views.setViewVisibility(R.id.courses_list, View.GONE)
-                views.setViewVisibility(R.id.loading_view, View.GONE)
-                views.setViewVisibility(R.id.empty_view, View.VISIBLE)
+                views.setViewVisibility(R.id.login_view, View.VISIBLE)
             } else {
-                // 有课程，显示列表
-                views.setViewVisibility(R.id.empty_view, View.GONE)
-                views.setViewVisibility(R.id.loading_view, View.GONE)
-                views.setViewVisibility(R.id.courses_list, View.VISIBLE)
+                views.setViewVisibility(R.id.login_view, View.GONE)
                 
-                // 设置 ListView 适配器，传递紧凑模式参数
-                val serviceIntent = Intent(context, CoursesWidgetService::class.java).apply {
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                    putExtra(CoursesWidgetService.EXTRA_COMPACT_MODE, isCompact)
-                    data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                // 解析作业数据
+                val works = parseWorks(worksJson)
+                
+                if (works.isEmpty()) {
+                    // 没有未交作业
+                    views.setViewVisibility(R.id.works_list, View.GONE)
+                    views.setViewVisibility(R.id.empty_view, View.VISIBLE)
+                } else {
+                    // 有作业，显示列表
+                    views.setViewVisibility(R.id.empty_view, View.GONE)
+                    views.setViewVisibility(R.id.works_list, View.VISIBLE)
+                    
+                    // 设置 ListView 适配器，传递紧凑模式参数
+                    val serviceIntent = Intent(context, WorksWidgetService::class.java).apply {
+                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                        putExtra(WorksWidgetService.EXTRA_COMPACT_MODE, isCompact)
+                        data = Uri.parse(toUri(Intent.URI_INTENT_SCHEME))
+                    }
+                    views.setRemoteAdapter(R.id.works_list, serviceIntent)
+                    views.setEmptyView(R.id.works_list, R.id.empty_view)
                 }
-                views.setRemoteAdapter(R.id.courses_list, serviceIntent)
-                views.setEmptyView(R.id.courses_list, R.id.empty_view)
             }
             
             // 设置点击事件 - 打开应用
@@ -127,33 +130,32 @@ class TodayCoursesWidgetProvider : AppWidgetProvider() {
             if (launchIntent != null) {
                 val pendingIntent = android.app.PendingIntent.getActivity(
                     context,
-                    appWidgetId,
+                    appWidgetId + 1000, // 使用不同的 requestCode
                     launchIntent,
                     android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                 )
                 views.setOnClickPendingIntent(R.id.widget_container, pendingIntent)
                 
                 // 设置列表项点击模板
-                views.setPendingIntentTemplate(R.id.courses_list, pendingIntent)
+                views.setPendingIntentTemplate(R.id.works_list, pendingIntent)
             }
             
             // 更新小组件
             appWidgetManager.updateAppWidget(appWidgetId, views)
             
         } catch (e: Exception) {
-            // 发生错误时显示加载状态
+            // 发生错误时显示登录状态
             try {
-                val errorViews = RemoteViews(context.packageName, R.layout.today_courses_widget)
-                errorViews.setViewVisibility(R.id.courses_list, View.GONE)
+                val errorViews = RemoteViews(context.packageName, R.layout.pending_works_widget)
+                errorViews.setViewVisibility(R.id.works_list, View.GONE)
                 errorViews.setViewVisibility(R.id.empty_view, View.GONE)
-                errorViews.setViewVisibility(R.id.loading_view, View.VISIBLE)
-                errorViews.setTextViewText(R.id.loading_text, "点击重新加载")
+                errorViews.setViewVisibility(R.id.login_view, View.VISIBLE)
                 
                 val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                 if (launchIntent != null) {
                     val pendingIntent = android.app.PendingIntent.getActivity(
                         context,
-                        appWidgetId,
+                        appWidgetId + 1000,
                         launchIntent,
                         android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
                     )
@@ -181,19 +183,18 @@ class TodayCoursesWidgetProvider : AppWidgetProvider() {
         }
     }
 
-    private fun parseCourses(coursesJson: String?): List<CourseItem> {
-        if (coursesJson.isNullOrEmpty()) return emptyList()
+    private fun parseWorks(worksJson: String?): List<WorkItem> {
+        if (worksJson.isNullOrEmpty()) return emptyList()
         return try {
-            val jsonArray = JSONArray(coursesJson)
+            val jsonArray = JSONArray(worksJson)
             (0 until jsonArray.length()).map { i ->
                 val obj = jsonArray.getJSONObject(i)
-                CourseItem(
-                    name = obj.optString("name", "未知课程"),
-                    location = obj.optString("location", ""),
-                    startSection = obj.optInt("startSection", 0),
-                    endSection = obj.optInt("endSection", 0),
-                    startTime = obj.optString("startTime", ""),
-                    endTime = obj.optString("endTime", "")
+                WorkItem(
+                    name = obj.optString("name", "未知作业"),
+                    courseName = obj.optString("courseName", ""),
+                    remainingTime = obj.optString("remainingTime", ""),
+                    isUrgent = obj.optBoolean("isUrgent", false),
+                    isOverdue = obj.optBoolean("isOverdue", false)
                 )
             }
         } catch (e: Exception) {
@@ -211,13 +212,12 @@ class TodayCoursesWidgetProvider : AppWidgetProvider() {
 }
 
 /**
- * 课程数据类
+ * 作业数据类
  */
-data class CourseItem(
+data class WorkItem(
     val name: String,
-    val location: String,
-    val startSection: Int,
-    val endSection: Int,
-    val startTime: String,
-    val endTime: String
+    val courseName: String,
+    val remainingTime: String,
+    val isUrgent: Boolean,
+    val isOverdue: Boolean
 )

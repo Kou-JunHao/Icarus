@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../models/xxt_work.dart';
 import '../services/xxt_service.dart';
+import '../services/widget_service.dart';
 
 /// 未交作业页面
 class XxtWorkScreen extends StatefulWidget {
@@ -33,7 +34,19 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
       _errorMessage = null;
     });
 
-    final result = await _xxtService.getUnfinishedWorks(forceRefresh: forceRefresh);
+    final result = await _xxtService.getUnfinishedWorks(
+      forceRefresh: forceRefresh,
+    );
+
+    // 更新作业小组件
+    if (result.success) {
+      await WidgetService.updateWorksWidget(
+        works: result.works,
+        needLogin: false,
+      );
+    } else if (result.needLogin) {
+      await WidgetService.updateWorksWidgetNeedLogin();
+    }
 
     if (mounted) {
       setState(() {

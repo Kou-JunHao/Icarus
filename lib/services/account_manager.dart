@@ -123,6 +123,11 @@ class AccountManager extends ChangeNotifier {
     XuexitongAccount? xuexitong,
     bool setAsActive = true,
   }) async {
+    // 确保已初始化
+    if (!_initialized) {
+      await init();
+    }
+
     // 检查是否已存在相同用户名的账号
     final existingIndex = _accounts.indexWhere((a) => a.username == username);
 

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../services/services.dart';
+import '../services/account_manager.dart';
 
 /// 登录页面
 class LoginScreen extends StatefulWidget {
@@ -145,6 +146,18 @@ class _LoginScreenState extends State<LoginScreen>
             _usernameController.text.trim(),
           );
         }
+
+        // 添加或更新账号到账号管理器
+        final username = _usernameController.text.trim();
+        final password = _passwordController.text;
+        final displayName = widget.jwxtService.currentUser?.name;
+        await AccountManager().addAccount(
+          username: username,
+          password: password,
+          displayName: displayName,
+          setAsActive: true,
+        );
+
         widget.onLoginSuccess();
       } else if (result is LoginNeedCaptcha) {
         setState(() {
@@ -206,6 +219,18 @@ class _LoginScreenState extends State<LoginScreen>
             _usernameController.text.trim(),
           );
         }
+
+        // 添加或更新账号到账号管理器
+        final username = _usernameController.text.trim();
+        final password = _passwordController.text;
+        final displayName = widget.jwxtService.currentUser?.name;
+        await AccountManager().addAccount(
+          username: username,
+          password: password,
+          displayName: displayName,
+          setAsActive: true,
+        );
+
         widget.onLoginSuccess();
       } else if (result is LoginFailure) {
         setState(() {

@@ -1,10 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 小组件文字颜色 - 暗色模式 -->
+    <!-- 小组件颜色 - 暗色模式 (Android 12 以下回退) -->
+    <color name="widget_background_color">#1C1B1F</color>
+    <color name="widget_surface_color">#2B2930</color>
     <color name="widget_text_primary">#E6E1E5</color>
     <color name="widget_text_secondary">#CAC4D0</color>
     <color name="widget_text_tertiary">#938F99</color>
     <color name="widget_text_hint">#79747E</color>
     <color name="widget_accent">#D0BCFF</color>
+    <color name="widget_accent_light">#4F378B</color>
     <color name="widget_divider">#49454F</color>
+    
+    <!-- 小组件元素背景 -->
+    <color name="widget_item_bg">#2B2930</color>
+    <color name="widget_badge_bg">#4F378B</color>
+    <color name="widget_badge_text">#EADDFF</color>
+    
+    <!-- 紧急状态颜色 -->
+    <color name="widget_urgent_bg">#4D1C1C</color>
+    <color name="widget_urgent_text">#EF9A9A</color>
 </resources>

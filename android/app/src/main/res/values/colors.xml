@@ -2,11 +2,23 @@
 <resources>
     <color name="ic_launcher_background">#4A90D9</color>
     
-    <!-- 小组件文字颜色 - 亮色模式 -->
-    <color name="widget_text_primary">#1A1A1A</color>
-    <color name="widget_text_secondary">#666666</color>
-    <color name="widget_text_tertiary">#999999</color>
-    <color name="widget_text_hint">#AAAAAA</color>
+    <!-- 小组件颜色 - 亮色模式 (Android 12 以下回退) -->
+    <color name="widget_background_color">#FFFBFE</color>
+    <color name="widget_surface_color">#F3EDF7</color>
+    <color name="widget_text_primary">#1C1B1F</color>
+    <color name="widget_text_secondary">#49454F</color>
+    <color name="widget_text_tertiary">#79747E</color>
+    <color name="widget_text_hint">#938F99</color>
     <color name="widget_accent">#6750A4</color>
-    <color name="widget_divider">#E0E0E0</color>
+    <color name="widget_accent_light">#EADDFF</color>
+    <color name="widget_divider">#CAC4D0</color>
+    
+    <!-- 小组件元素背景 -->
+    <color name="widget_item_bg">#F3EDF7</color>
+    <color name="widget_badge_bg">#EADDFF</color>
+    <color name="widget_badge_text">#21005E</color>
+    
+    <!-- 紧急状态颜色 -->
+    <color name="widget_urgent_bg">#FFEBEE</color>
+    <color name="widget_urgent_text">#C62828</color>
 </resources>

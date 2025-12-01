@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ 莫奈动态取色 - 亮色模式 -->
+    <color name="widget_background_color">@android:color/system_accent2_50</color>
+    <color name="widget_surface_color">@android:color/system_accent2_100</color>
+    <color name="widget_text_primary">@android:color/system_neutral1_900</color>
+    <color name="widget_text_secondary">@android:color/system_neutral1_700</color>
+    <color name="widget_text_tertiary">@android:color/system_neutral1_500</color>
+    <color name="widget_text_hint">@android:color/system_neutral1_400</color>
+    <color name="widget_accent">@android:color/system_accent1_600</color>
+    <color name="widget_accent_light">@android:color/system_accent1_100</color>
+    <color name="widget_divider">@android:color/system_neutral2_200</color>
+    
+    <!-- 小组件元素背景 -->
+    <color name="widget_item_bg">@android:color/system_accent2_100</color>
+    <color name="widget_badge_bg">@android:color/system_accent1_100</color>
+    <color name="widget_badge_text">@android:color/system_accent1_700</color>
+    
+    <!-- 紧急状态颜色 -->
+    <color name="widget_urgent_bg">#FFEBEE</color>
+    <color name="widget_urgent_text">#C62828</color>
+</resources>
