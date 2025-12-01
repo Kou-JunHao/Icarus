@@ -334,7 +334,8 @@ class UpdateService {
   static const String _keyLastCheckTime = 'update_last_check_time';
   static const String _keyCustomMirrors = 'update_custom_mirrors';
   static const String _keySelectedMirror = 'update_selected_mirror';
-  static const String _keyLastDownloadedVersion = 'update_last_downloaded_version';
+  static const String _keyLastDownloadedVersion =
+      'update_last_downloaded_version';
 
   /// 内置镜像源列表
   static final List<MirrorSource> _builtinMirrors = [
@@ -841,7 +842,9 @@ class UpdateService {
         final completedResult = await _checkDownloadCompleted();
         if (completedResult != null) {
           // 使用原生端返回的路径，如果为空则使用传入的 filePath
-          final actualPath = completedResult.isNotEmpty ? completedResult : filePath;
+          final actualPath = completedResult.isNotEmpty
+              ? completedResult
+              : filePath;
           // 保存已下载的版本信息，用于后续清理
           await _saveLastDownloadedVersion(version);
           _updateProgress(
@@ -894,10 +897,7 @@ class UpdateService {
               // 服务已停止但文件不完整，查询具体错误类型
               final error = await _getLastDownloadError();
               _updateProgress(
-                DownloadProgress.failed(
-                  version: version,
-                  error: error,
-                ),
+                DownloadProgress.failed(version: version, error: error),
               );
               return DownloadResult.failure(error);
             }
@@ -906,10 +906,7 @@ class UpdateService {
           // 服务已停止且没有文件，查询具体错误类型
           final error = await _getLastDownloadError();
           _updateProgress(
-            DownloadProgress.failed(
-              version: version,
-              error: error,
-            ),
+            DownloadProgress.failed(version: version, error: error),
           );
           return DownloadResult.failure(error);
         }
