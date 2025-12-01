@@ -15,6 +15,7 @@
   <a href="#技术栈">技术栈</a> •
   <a href="#许可证">许可证</a>
 </p>
+[如有其他学校适配请求，请发送邮件至 skkk@skkk.uno](mailto:skkk@skkk.uno?subject=学校适配需求&body=请在此输入内容) 联系。
 
 ---
 
