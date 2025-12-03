@@ -8,6 +8,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/update_service.dart';
 
@@ -443,14 +445,65 @@ class _UpdateDialogState extends State<UpdateDialog> {
               color: colorScheme.outlineVariant.withValues(alpha: 0.5),
             ),
           ),
-          child: SingleChildScrollView(
-            child: Text(
-              widget.updateInfo.changelog,
-              style: theme.textTheme.bodyMedium?.copyWith(
+          child: Markdown(
+            data: widget.updateInfo.changelog,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            physics: const ClampingScrollPhysics(),
+            styleSheet: MarkdownStyleSheet(
+              p: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurface,
                 height: 1.5,
               ),
+              h1: theme.textTheme.titleMedium?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+              ),
+              h2: theme.textTheme.titleSmall?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.bold,
+              ),
+              h3: theme.textTheme.bodyLarge?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
+              listBullet: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.primary,
+              ),
+              code: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.primary,
+                backgroundColor: colorScheme.primaryContainer.withValues(
+                  alpha: 0.3,
+                ),
+                fontFamily: 'monospace',
+              ),
+              codeblockDecoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              blockquoteDecoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest,
+                border: Border(
+                  left: BorderSide(color: colorScheme.primary, width: 3),
+                ),
+              ),
+              blockquotePadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 8,
+              ),
+              a: theme.textTheme.bodyMedium?.copyWith(
+                color: colorScheme.primary,
+                decoration: TextDecoration.underline,
+              ),
             ),
+            onTapLink: (text, href, title) {
+              if (href != null) {
+                launchUrl(
+                  Uri.parse(href),
+                  mode: LaunchMode.externalApplication,
+                );
+              }
+            },
           ),
         ),
       ],
