@@ -35,6 +35,8 @@ class AuthStorage {
   static const String _keyUserCacheTime = 'cache_user_time';
   static const String _keyWorksCache = 'cache_works';
   static const String _keyWorksCacheTime = 'cache_works_time';
+  static const String _keyActivitiesCache = 'cache_activities';
+  static const String _keyActivitiesCacheTime = 'cache_activities_time';
 
   // 天气城市相关 keys
   static const String _keyWeatherCityPinyin = 'weather_city_pinyin';
@@ -46,6 +48,7 @@ class AuthStorage {
   static const int gradesCacheMinutes = 21600; // 成绩缓存15天（15*24*60=21600分钟）
   static const int userCacheMinutes = 43200; // 用户信息缓存30天（30*24*60=43200分钟）
   static const int worksCacheMinutes = 120; // 作业缓存2小时（120分钟）
+  static const int activitiesCacheMinutes = 30; // 活动缓存30分钟
 
   // 通知状态相关 keys
   static const String _keyReadNotificationIds = 'read_notification_ids';
@@ -458,6 +461,47 @@ class AuthStorage {
     await clearGradesCache();
     await clearUserCache();
     await clearWorksCache();
+    await clearActivitiesCache();
+  }
+
+  // ==================== 活动缓存 ====================
+
+  /// 保存活动缓存
+  static Future<void> saveActivitiesCache(String jsonData) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyActivitiesCache, jsonData);
+    await prefs.setString(
+      _keyActivitiesCacheTime,
+      DateTime.now().toIso8601String(),
+    );
+  }
+
+  /// 获取活动缓存
+  /// 返回 (缓存数据, 是否有效)
+  static Future<(String?, bool)> getActivitiesCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString(_keyActivitiesCache);
+    final timeStr = prefs.getString(_keyActivitiesCacheTime);
+
+    if (data == null || timeStr == null) {
+      return (null, false);
+    }
+
+    final cachedAt = DateTime.tryParse(timeStr);
+    if (cachedAt == null) {
+      return (data, false);
+    }
+
+    final isValid =
+        DateTime.now().difference(cachedAt).inMinutes < activitiesCacheMinutes;
+    return (data, isValid);
+  }
+
+  /// 清除活动缓存
+  static Future<void> clearActivitiesCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyActivitiesCache);
+    await prefs.remove(_keyActivitiesCacheTime);
   }
 
   // ==================== 作业缓存 ====================
@@ -466,10 +510,7 @@ class AuthStorage {
   static Future<void> saveWorksCache(String jsonData) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyWorksCache, jsonData);
-    await prefs.setString(
-      _keyWorksCacheTime,
-      DateTime.now().toIso8601String(),
-    );
+    await prefs.setString(_keyWorksCacheTime, DateTime.now().toIso8601String());
   }
 
   /// 获取作业缓存

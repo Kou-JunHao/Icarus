@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../models/xxt_work.dart';
 import '../services/xxt_service.dart';
 import '../services/widget_service.dart';
+import 'account_manage_screen.dart';
 
 /// 未交作业页面
 class XxtWorkScreen extends StatefulWidget {
@@ -548,13 +549,13 @@ class _XxtWorkScreenState extends State<XxtWorkScreen> {
   }
 
   void _openAccountSettings() {
-    // 返回上一页，提示用户去账号管理配置
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('请在"账号管理"中配置学习通账号'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    // 直接导航到账号管理页面配置学习通
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AccountManageScreen()),
+    ).then((_) {
+      // 返回后刷新数据
+      _loadWorks(forceRefresh: true);
+    });
   }
 }

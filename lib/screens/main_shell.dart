@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../services/services.dart';
 import 'home_screen.dart';
 import 'schedule_screen.dart';
+import 'study_screen.dart';
 import 'grades_screen.dart';
 import 'profile_screen.dart';
 
@@ -41,6 +42,11 @@ class _MainShellState extends State<MainShell> {
       icon: Icon(Icons.calendar_month_outlined),
       selectedIcon: Icon(Icons.calendar_month),
       label: '课程表',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.menu_book_outlined),
+      selectedIcon: Icon(Icons.menu_book),
+      label: '学习',
     ),
     NavigationDestination(
       icon: Icon(Icons.school_outlined),
@@ -120,11 +126,13 @@ class _MainShellState extends State<MainShell> {
           dataManager: widget.dataManager,
         );
       case 2:
+        return const StudyScreen(key: ValueKey('study'));
+      case 3:
         return GradesScreen(
           key: const ValueKey('grades'),
           dataManager: widget.dataManager,
         );
-      case 3:
+      case 4:
         return ProfileScreen(
           key: const ValueKey('profile'),
           dataManager: widget.dataManager,

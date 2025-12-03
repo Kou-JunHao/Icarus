@@ -10,3 +10,4 @@ export 'main_shell.dart';
 export 'update_dialog.dart';
 export 'account_manage_screen.dart';
 export 'xxt_work_screen.dart';
+export 'study_screen.dart';

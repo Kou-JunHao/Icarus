@@ -6,3 +6,4 @@ export 'course.dart';
 export 'grade.dart';
 export 'account.dart';
 export 'xxt_work.dart';
+export 'xxt_activity.dart';

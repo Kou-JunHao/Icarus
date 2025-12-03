@@ -34,6 +34,20 @@ class NotificationService {
   static const String _channelName = '课程提醒';
   static const String _channelDescription = '课程开始前的提醒通知';
 
+  // 活动通知渠道
+  static const String _activityChannelId = 'activity_reminder';
+  static const String _activityChannelName = '活动提醒';
+  static const String _activityChannelDescription = '学习通活动即将结束的提醒通知';
+
+  // 活动通知设置 keys
+  static const String _keyActivityNotificationEnabled =
+      'activity_notification_enabled';
+  static const String _keyActivityNotificationMinutesBefore =
+      'activity_notification_minutes_before';
+
+  // 默认活动提前分钟数
+  static const int defaultActivityMinutesBefore = 10;
+
   bool _isInitialized = false;
   static bool _tzInitialized = false;
 
@@ -82,6 +96,17 @@ class NotificationService {
           _channelId,
           _channelName,
           description: _channelDescription,
+          importance: Importance.high,
+          playSound: true,
+          enableVibration: true,
+        ),
+      );
+      // 创建活动通知渠道
+      await androidPlugin?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _activityChannelId,
+          _activityChannelName,
+          description: _activityChannelDescription,
           importance: Importance.high,
           playSound: true,
           enableVibration: true,
@@ -157,6 +182,31 @@ class NotificationService {
   Future<void> setMinutesBefore(int minutes) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyNotificationMinutesBefore, minutes);
+  }
+
+  /// 获取活动通知是否启用
+  Future<bool> isActivityNotificationEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyActivityNotificationEnabled) ?? true;
+  }
+
+  /// 设置活动通知是否启用
+  Future<void> setActivityNotificationEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyActivityNotificationEnabled, enabled);
+  }
+
+  /// 获取活动提前通知的分钟数
+  Future<int> getActivityMinutesBefore() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyActivityNotificationMinutesBefore) ??
+        defaultActivityMinutesBefore;
+  }
+
+  /// 设置活动提前通知的分钟数
+  Future<void> setActivityMinutesBefore(int minutes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyActivityNotificationMinutesBefore, minutes);
   }
 
   /// 为课程安排通知
@@ -349,6 +399,184 @@ class NotificationService {
     );
 
     debugPrint('已安排作业通知: $workName, 时间: $scheduledTime');
+  }
+
+  /// 为活动安排即将结束通知
+  /// [activityName] 活动名称
+  /// [courseName] 课程名称
+  /// [activityType] 活动类型（签到、测验等）
+  /// [endTime] 结束时间
+  Future<void> scheduleActivityNotification({
+    required String activityName,
+    required String courseName,
+    required String activityType,
+    required DateTime endTime,
+  }) async {
+    if (!_isInitialized) await initialize();
+    _initializeTimezone();
+
+    final isEnabled = await isActivityNotificationEnabled();
+    if (!isEnabled) {
+      debugPrint('活动通知未启用');
+      return;
+    }
+
+    final hasPermission = await checkPermission();
+    if (!hasPermission) {
+      debugPrint('没有通知权限');
+      return;
+    }
+
+    final minutesBefore = await getActivityMinutesBefore();
+    final now = DateTime.now();
+
+    // 计算通知时间（结束前 N 分钟）
+    final notifyTime = endTime.subtract(Duration(minutes: minutesBefore));
+
+    // 如果通知时间已过或结束时间已过，不安排通知
+    if (notifyTime.isBefore(now) || endTime.isBefore(now)) {
+      debugPrint('活动通知时间已过: $activityName');
+      return;
+    }
+
+    // 生成唯一 ID（基于活动名称和结束时间）
+    final notificationId =
+        ('activity_${activityName}_${endTime.millisecondsSinceEpoch}').hashCode
+                .abs() %
+            100000 +
+        10000; // 10000-109999 范围，避免与其他通知冲突
+
+    final remainingMinutes = endTime.difference(now).inMinutes;
+    final body = '[$courseName] $activityName\n⏰ 还有 $minutesBefore 分钟结束，请尽快完成！';
+
+    final androidDetails = AndroidNotificationDetails(
+      _activityChannelId,
+      _activityChannelName,
+      channelDescription: _activityChannelDescription,
+      importance: Importance.high,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      icon: '@mipmap/ic_launcher',
+      styleInformation: BigTextStyleInformation(body),
+    );
+
+    const darwinDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: darwinDetails,
+    );
+
+    // 根据活动类型选择图标
+    String typeEmoji;
+    switch (activityType) {
+      case '签到':
+        typeEmoji = '📍';
+        break;
+      case '测验':
+      case '随堂练习':
+        typeEmoji = '📝';
+        break;
+      case '分组任务':
+        typeEmoji = '👥';
+        break;
+      default:
+        typeEmoji = '⚡';
+    }
+
+    await _notifications.zonedSchedule(
+      notificationId,
+      '$typeEmoji $activityType即将结束',
+      body,
+      tz.TZDateTime.from(notifyTime, tz.local),
+      details,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      payload: 'activity_$activityName',
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
+
+    debugPrint(
+      '已安排活动通知: $activityName, '
+      '结束时间: $endTime, '
+      '通知时间: $notifyTime (提前$minutesBefore分钟)',
+    );
+  }
+
+  /// 为活动立即显示通知（活动即将在很短时间内结束时使用）
+  Future<void> showActivityUrgentNotification({
+    required String activityName,
+    required String courseName,
+    required String activityType,
+    required int remainingMinutes,
+  }) async {
+    if (!_isInitialized) await initialize();
+
+    final isEnabled = await isActivityNotificationEnabled();
+    if (!isEnabled) return;
+
+    final hasPermission = await checkPermission();
+    if (!hasPermission) return;
+
+    final notificationId =
+        ('urgent_$activityName').hashCode.abs() % 100000 + 110000;
+
+    String typeEmoji;
+    switch (activityType) {
+      case '签到':
+        typeEmoji = '📍';
+        break;
+      case '测验':
+      case '随堂练习':
+        typeEmoji = '📝';
+        break;
+      case '分组任务':
+        typeEmoji = '👥';
+        break;
+      default:
+        typeEmoji = '⚡';
+    }
+
+    final body =
+        '[$courseName] $activityName\n⚠️ 仅剩 $remainingMinutes 分钟，请立即处理！';
+
+    final androidDetails = AndroidNotificationDetails(
+      _activityChannelId,
+      _activityChannelName,
+      channelDescription: _activityChannelDescription,
+      importance: Importance.max,
+      priority: Priority.max,
+      playSound: true,
+      enableVibration: true,
+      icon: '@mipmap/ic_launcher',
+      styleInformation: BigTextStyleInformation(body),
+    );
+
+    const darwinDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    final details = NotificationDetails(
+      android: androidDetails,
+      iOS: darwinDetails,
+    );
+
+    await _notifications.show(
+      notificationId,
+      '$typeEmoji 紧急：$activityType即将结束！',
+      body,
+      details,
+      payload: 'urgent_activity_$activityName',
+    );
+
+    debugPrint('已发送紧急活动通知: $activityName');
   }
 
   /// 立即显示通知（用于测试）

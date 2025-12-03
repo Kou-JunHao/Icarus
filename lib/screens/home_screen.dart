@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/models.dart';
 import '../services/services.dart';
+import 'account_manage_screen.dart';
 import 'schedule_screen.dart' show CourseColors;
 import 'update_dialog.dart';
 import 'xxt_work_screen.dart';
@@ -719,6 +720,12 @@ class _HomeScreenState extends State<HomeScreen>
                       if (!isLoading && !hasError)
                         if (todayCourses.isEmpty)
                           _buildEmptyCoursesCard(theme, colorScheme)
+                        else if (_areAllCoursesFinished(todayCourses))
+                          _buildEmptyCoursesCard(
+                            theme,
+                            colorScheme,
+                            allFinished: true,
+                          )
                         else
                           _buildCourseCarousel(
                             theme,
@@ -1672,6 +1679,17 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// 打开账号管理页面（配置学习通）
+  void _openAccountManageScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AccountManageScreen()),
+    ).then((_) {
+      // 返回后刷新作业数据
+      _loadUrgentWorks();
+    });
+  }
+
   /// 启动超星学习通
   Future<void> _launchXuexitong() async {
     // 超星学习通包名
@@ -1921,7 +1939,37 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildEmptyCoursesCard(ThemeData theme, ColorScheme colorScheme) {
+  /// 检查是否所有课程都已结束
+  bool _areAllCoursesFinished(List<Course> courses) {
+    if (courses.isEmpty) return false;
+
+    final now = DateTime.now();
+    for (final course in courses) {
+      final endTimeStr = _getSectionTime(course.endSection, false);
+      if (endTimeStr == '--:--') continue;
+
+      final parts = endTimeStr.split(':');
+      final endTime = DateTime(
+        now.year,
+        now.month,
+        now.day,
+        int.parse(parts[0]),
+        int.parse(parts[1]),
+      );
+
+      // 如果有任何课程未结束，返回 false
+      if (!now.isAfter(endTime)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Widget _buildEmptyCoursesCard(
+    ThemeData theme,
+    ColorScheme colorScheme, {
+    bool allFinished = false,
+  }) {
     return Card(
       elevation: 0,
       color: colorScheme.surfaceContainerLow,
@@ -1937,21 +1985,23 @@ class _HomeScreenState extends State<HomeScreen>
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.celebration_outlined,
+                allFinished
+                    ? Icons.check_circle_outline_rounded
+                    : Icons.celebration_outlined,
                 size: 48,
                 color: colorScheme.primary,
               ),
             ),
             const SizedBox(height: 16),
             Text(
-              '今天没有课程',
+              allFinished ? '今日课程已结束' : '今天没有课程',
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              '享受美好的一天吧！',
+              allFinished ? '好好休息，明天继续加油！' : '享受美好的一天吧！',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -2610,7 +2660,7 @@ class _HomeScreenState extends State<HomeScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: _openXxtWorkScreen,
+          onTap: _openAccountManageScreen,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(

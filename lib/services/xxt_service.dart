@@ -1,5 +1,5 @@
 /// 学习通服务
-/// 处理学习通登录和未交作业查询
+/// 处理学习通登录、未交作业查询和进行中活动查询
 library;
 
 import 'dart:convert';
@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../models/xxt_work.dart';
+import '../models/xxt_activity.dart';
 import 'account_manager.dart';
 import 'auth_storage.dart';
 
@@ -278,24 +279,32 @@ class XxtService {
 
   /// 将作业列表序列化为缓存字符串
   String _serializeWorksToCache(List<XxtWork> works) {
-    final list = works.map((w) => {
-      'name': w.name,
-      'status': w.status,
-      'remainingTime': w.remainingTime,
-      'courseName': w.courseName,
-    }).toList();
+    final list = works
+        .map(
+          (w) => {
+            'name': w.name,
+            'status': w.status,
+            'remainingTime': w.remainingTime,
+            'courseName': w.courseName,
+          },
+        )
+        .toList();
     return jsonEncode(list);
   }
 
   /// 从缓存字符串解析作业列表
   List<XxtWork> _parseWorksFromCache(String cacheData) {
     final list = jsonDecode(cacheData) as List;
-    return list.map((item) => XxtWork.fromParsed(
-      name: item['name'] ?? '',
-      status: item['status'] ?? '未提交',
-      remainingTime: item['remainingTime'] ?? '未知',
-      courseName: item['courseName'],
-    )).toList();
+    return list
+        .map(
+          (item) => XxtWork.fromParsed(
+            name: item['name'] ?? '',
+            status: item['status'] ?? '未提交',
+            remainingTime: item['remainingTime'] ?? '未知',
+            courseName: item['courseName'],
+          ),
+        )
+        .toList();
   }
 
   /// 使用指定的账号密码获取未交作业
@@ -334,5 +343,628 @@ class XxtService {
   /// 清除登录状态
   void clearSession() {
     _cookie = null;
+  }
+
+  // ========== 进行中活动相关方法 ==========
+
+  /// 课程列表 URL
+  static const String _courseListUrl =
+      'http://mooc1-1.chaoxing.com/visit/courselistdata';
+
+  /// 活动检查 URL 模板
+  static const String _activityCheckUrl =
+      'https://mobilelearn.chaoxing.com/widget/pcpick/stu/index';
+
+  /// 获取课程列表
+  Future<List<Map<String, String>>> _getCourseList() async {
+    if (_cookie == null || _cookie!.isEmpty) {
+      return [];
+    }
+
+    try {
+      final response = await _dio.post(
+        _courseListUrl,
+        data: 'courseType=1&courseFolderId=0&courseFolderSize=0',
+        options: Options(
+          headers: {
+            'Cookie': _cookie,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        ),
+      );
+
+      final html = response.data?.toString();
+      if (html == null || html.isEmpty) return [];
+
+      final document = html_parser.parse(html);
+      final courses = <Map<String, String>>[];
+
+      for (final li in document.querySelectorAll('li.course.clearfix')) {
+        // 跳过已结课的课程
+        final reviewDiv = li.querySelector('.course-cover .ui-open-review');
+        if (reviewDiv != null && reviewDiv.text.contains('已开启结课模式')) {
+          continue;
+        }
+
+        final courseId = li.attributes['courseid'];
+        final classId = li.attributes['clazzid'];
+        final nameSpan = li.querySelector('span.course-name');
+
+        if (courseId != null && classId != null && nameSpan != null) {
+          courses.add({
+            'name': nameSpan.text.trim(),
+            'courseId': courseId,
+            'classId': classId,
+          });
+        }
+      }
+
+      debugPrint('获取到 ${courses.length} 门课程');
+      return courses;
+    } catch (e) {
+      debugPrint('获取课程列表失败: $e');
+      return [];
+    }
+  }
+
+  /// 获取活动结束时间（通过 API）
+  Future<DateTime?> _getActivityEndTime(String activeId) async {
+    if (_cookie == null || _cookie!.isEmpty) return null;
+
+    try {
+      final url =
+          'https://mobilelearn.chaoxing.com/v2/apis/active/getActiveEndtime'
+          '?DB_STRATEGY=PRIMARY_KEY&STRATEGY_PARA=activeId&activeId=$activeId';
+
+      final response = await _dio.get(
+        url,
+        options: Options(
+          headers: {
+            'Cookie': _cookie,
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+
+      debugPrint('获取结束时间 API 响应: ${response.data}');
+      if (response.data is Map) {
+        final data = response.data as Map;
+        final innerData = data['data'];
+        debugPrint('innerData: $innerData');
+        if (innerData is Map && innerData['endtime'] != null) {
+          // endtime 是毫秒时间戳
+          final endtimeMs = innerData['endtime'];
+          debugPrint('endtimeMs: $endtimeMs (type: ${endtimeMs.runtimeType})');
+          if (endtimeMs is int && endtimeMs > 0) {
+            final endTime = DateTime.fromMillisecondsSinceEpoch(endtimeMs);
+            debugPrint('解析到结束时间: $endTime');
+            return endTime;
+          }
+        }
+      }
+      debugPrint('未能解析结束时间，响应数据: ${response.data}');
+      return null;
+    } catch (e) {
+      debugPrint('获取活动结束时间失败: activeId=$activeId, $e');
+      return null;
+    }
+  }
+
+  /// 检查活动状态（签到/练习是否已完成）
+  /// 返回: XxtActivityStatus
+  Future<XxtActivityStatus> _checkActivityStatus(
+    String activeId,
+    String activeType,
+  ) async {
+    if (_cookie == null || _cookie!.isEmpty) return XxtActivityStatus.unknown;
+
+    try {
+      String url;
+
+      // activeType: 2=签到, 42=随堂练习
+      if (activeType == '2') {
+        // 签到状态
+        url =
+            'https://mobilelearn.chaoxing.com/v2/apis/sign/signIn?activeId=$activeId';
+      } else if (activeType == '42') {
+        // 练习状态
+        url =
+            'https://mobilelearn.chaoxing.com/v2/apis/studentQuestion/getAnswerResult?activeId=$activeId';
+      } else {
+        return XxtActivityStatus.unknown;
+      }
+
+      final response = await _dio.get(
+        url,
+        options: Options(
+          headers: {
+            'Cookie': _cookie,
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+
+      debugPrint('检查活动状态 API 响应: ${response.data}');
+      if (response.data is Map) {
+        final data = response.data as Map;
+
+        if (activeType == '2') {
+          // 签到: result=1 表示已签到
+          debugPrint('签到状态 result: ${data['result']}');
+          if (data['result'] == 1) {
+            debugPrint('签到状态: 已签到');
+            return XxtActivityStatus.completed;
+          } else {
+            debugPrint('签到状态: 未签到');
+            return XxtActivityStatus.pending;
+          }
+        } else if (activeType == '42') {
+          // 练习: 检查是否有答题结果
+          final innerData = data['data'];
+          debugPrint('练习状态 data: $innerData');
+          if (innerData != null) {
+            // 如果有数据说明已交
+            debugPrint('练习状态: 已提交');
+            return XxtActivityStatus.completed;
+          } else {
+            debugPrint('练习状态: 未提交');
+            return XxtActivityStatus.pending;
+          }
+        }
+      }
+      debugPrint('活动状态未知，activeType=$activeType');
+      return XxtActivityStatus.unknown;
+    } catch (e) {
+      debugPrint('检查活动状态失败: activeId=$activeId, $e');
+      return XxtActivityStatus.unknown;
+    }
+  }
+
+  /// 从 onclick 属性提取 activeId 和 activeType
+  /// 格式: activeDetail(5000140963764,35,null)
+  ({String? activeId, String? activeType}) _parseActiveDetail(String? onclick) {
+    if (onclick == null || onclick.isEmpty) {
+      debugPrint('onclick 为空');
+      return (activeId: null, activeType: null);
+    }
+
+    debugPrint('解析 onclick: $onclick');
+    final match = RegExp(r'activeDetail\((\d+),(\d+)').firstMatch(onclick);
+    if (match != null) {
+      final activeId = match.group(1);
+      final activeType = match.group(2);
+      debugPrint('提取到 activeId=$activeId, activeType=$activeType');
+      return (activeId: activeId, activeType: activeType);
+    }
+    debugPrint('未能从 onclick 提取 activeId');
+    return (activeId: null, activeType: null);
+  }
+
+  /// 检查单个课程的进行中活动
+  Future<XxtCourseActivities?> _checkCourseActivities(
+    Map<String, String> course,
+  ) async {
+    if (_cookie == null || _cookie!.isEmpty) return null;
+
+    try {
+      // 注意：Python 脚本使用的是 courseid 和 clazzid（小写）
+      final courseId = course['courseId'] ?? course['courseid'];
+      final classId = course['classId'] ?? course['clazzid'];
+
+      final url = '$_activityCheckUrl?courseId=$courseId&jclassId=$classId';
+
+      final response = await _dio.get(
+        url,
+        options: Options(
+          headers: {
+            'Cookie': _cookie,
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+          receiveTimeout: const Duration(seconds: 8),
+        ),
+      );
+
+      final html = response.data?.toString();
+      if (html == null || html.isEmpty) {
+        return null;
+      }
+
+      final document = html_parser.parse(html);
+      final activities = <XxtActivity>[];
+
+      // ============ 第零步：检查课程是否已结课 ============
+      // 检查 not-open-tip 元素，可能包含 "课程已结束" 文字
+      final notOpenTip = document.querySelector('.not-open-tip');
+      if (notOpenTip != null) {
+        final tipText = notOpenTip.text.trim();
+        if (tipText.contains('课程已结束') || tipText.contains('结课')) {
+          debugPrint('跳过已结课课程: ${course['name']}');
+          return null;
+        }
+      }
+
+      // ============ 第一步：验证是否有进行中的活动 ============
+      // 查找所有 a 标签，找到包含"进行中"文本的那个
+      int ongoingCount = 0;
+      bool foundOngoingTab = false;
+
+      for (final anchor in document.querySelectorAll('a')) {
+        final text = anchor.text.trim();
+        if (text.contains('进行中')) {
+          foundOngoingTab = true;
+          // 提取括号中的数字
+          final countMatch = RegExp(r'\((\d+)\)').firstMatch(text);
+          if (countMatch != null) {
+            ongoingCount = int.tryParse(countMatch.group(1) ?? '0') ?? 0;
+          }
+          break;
+        }
+      }
+
+      // 如果没找到进行中标签或活动数为0，直接返回null
+      if (!foundOngoingTab || ongoingCount == 0) {
+        return null;
+      }
+
+      // ============ 第二步：解析活动详情 ============
+      // 策略1: 从 startList 提取活动（这是进行中活动的主要容器）
+      final startList = document.querySelector('div#startList');
+      debugPrint('startList 存在: ${startList != null}');
+      if (startList != null) {
+        final mcts = startList.querySelectorAll('div.Mct');
+        debugPrint('找到 ${mcts.length} 个 Mct 元素');
+        for (final mct in mcts) {
+          final dd = mct.querySelector('dd');
+          final center = mct.querySelector('div.Mct_center');
+          final anchor = center?.querySelector('a');
+
+          // 尝试从多个位置查找 onclick 属性
+          // 1. 先检查 Mct 元素本身
+          // 2. 检查 Mct_center
+          // 3. 检查 anchor
+          String? onclick = mct.attributes['onclick'];
+          if (onclick == null || onclick.isEmpty) {
+            onclick = center?.attributes['onclick'];
+          }
+          if (onclick == null || onclick.isEmpty) {
+            onclick = anchor?.attributes['onclick'];
+          }
+
+          // 如果还是没有，尝试从整个 mct 的 HTML 中提取 activeDetail
+          if (onclick == null || onclick.isEmpty) {
+            final mctHtml = mct.outerHtml;
+            final activeMatch = RegExp(
+              r'activeDetail\((\d+),(\d+)',
+            ).firstMatch(mctHtml);
+            if (activeMatch != null) {
+              onclick =
+                  'activeDetail(${activeMatch.group(1)},${activeMatch.group(2)},null)';
+              debugPrint('从 HTML 中提取到 onclick: $onclick');
+            }
+          }
+
+          // 调试：输出查找结果
+          debugPrint(
+            'Mct outerHtml 前200字符: ${mct.outerHtml.substring(0, mct.outerHtml.length > 200 ? 200 : mct.outerHtml.length)}',
+          );
+
+          final (:activeId, :activeType) = _parseActiveDetail(onclick);
+
+          final typeName = dd?.text.trim() ?? '未知';
+          final activityName = anchor?.text.trim() ?? '未知活动';
+
+          debugPrint(
+            '解析活动: $activityName, activeId=$activeId, activeType=$activeType',
+          );
+
+          if (activityName.isNotEmpty && activityName != '未知活动') {
+            activities.add(
+              XxtActivity.fromParsed(
+                typeName: typeName,
+                name: activityName,
+                activeId: activeId,
+                activeType: activeType,
+              ),
+            );
+          }
+        }
+      }
+
+      // 策略2: 如果 startList 为空，检查页面中的所有 Mct 元素
+      if (activities.isEmpty) {
+        for (final mct in document.querySelectorAll('div.Mct')) {
+          final dd = mct.querySelector('dd');
+          final center = mct.querySelector('div.Mct_center');
+          final anchor = center?.querySelector('a');
+
+          // 尝试从多个位置查找 onclick 属性
+          String? onclick = mct.attributes['onclick'];
+          if (onclick == null || onclick.isEmpty) {
+            onclick = center?.attributes['onclick'];
+          }
+          if (onclick == null || onclick.isEmpty) {
+            onclick = anchor?.attributes['onclick'];
+          }
+          // 从 HTML 中提取
+          if (onclick == null || onclick.isEmpty) {
+            final mctHtml = mct.outerHtml;
+            final activeMatch = RegExp(
+              r'activeDetail\((\d+),(\d+)',
+            ).firstMatch(mctHtml);
+            if (activeMatch != null) {
+              onclick =
+                  'activeDetail(${activeMatch.group(1)},${activeMatch.group(2)},null)';
+            }
+          }
+
+          final (:activeId, :activeType) = _parseActiveDetail(onclick);
+
+          final typeName = dd?.text.trim() ?? '未知';
+          final activityName = anchor?.text.trim() ?? '未知活动';
+
+          if (activityName.isNotEmpty && activityName != '未知活动') {
+            activities.add(
+              XxtActivity.fromParsed(
+                typeName: typeName,
+                name: activityName,
+                activeId: activeId,
+                activeType: activeType,
+              ),
+            );
+          }
+        }
+      }
+
+      // 策略3: 如果还是空，查找其他可能的活动容器结构
+      if (activities.isEmpty) {
+        // 检查 ul.listBox li 结构
+        for (final li in document.querySelectorAll('ul.listBox li')) {
+          final typeSpan = li.querySelector('span.type');
+          final nameSpan =
+              li.querySelector('span.name') ??
+              li.querySelector('a') ??
+              li.querySelector('.title');
+          final anchor = li.querySelector('a');
+
+          // 尝试从 anchor 提取 activeId
+          final onclick = anchor?.attributes['onclick'];
+          final (:activeId, :activeType) = _parseActiveDetail(onclick);
+
+          final typeName = typeSpan?.text.trim() ?? '未知';
+          final activityName = nameSpan?.text.trim() ?? '未知活动';
+
+          if (activityName.isNotEmpty && activityName != '未知活动') {
+            activities.add(
+              XxtActivity.fromParsed(
+                typeName: typeName,
+                name: activityName,
+                activeId: activeId,
+                activeType: activeType,
+              ),
+            );
+          }
+        }
+      }
+
+      // 如果显示有活动但解析失败，输出调试信息
+      if (activities.isEmpty && ongoingCount > 0) {
+        debugPrint(
+          '警告: ${course['name']} 显示有 $ongoingCount 个活动但未能解析，HTML长度: ${html.length}',
+        );
+        // 输出部分 HTML 便于调试
+        final preview = html.length > 1000 ? html.substring(0, 1000) : html;
+        debugPrint('HTML预览: $preview');
+      }
+
+      if (activities.isEmpty) {
+        return null;
+      }
+
+      // ============ 第三步：通过 API 获取结束时间和状态 ============
+      final enrichedActivities = <XxtActivity>[];
+
+      for (final activity in activities) {
+        if (activity.activeId != null) {
+          // 并行获取结束时间和状态
+          final futures = await Future.wait([
+            _getActivityEndTime(activity.activeId!),
+            if (activity.activeType != null)
+              _checkActivityStatus(activity.activeId!, activity.activeType!)
+            else
+              Future.value(XxtActivityStatus.unknown),
+          ]);
+
+          final endTime = futures[0] as DateTime?;
+          final status = futures.length > 1
+              ? futures[1] as XxtActivityStatus
+              : XxtActivityStatus.unknown;
+
+          final enrichedActivity = activity.copyWith(
+            endTime: endTime,
+            status: status,
+          );
+
+          // 过滤掉已完成和已过期的活动
+          if (!enrichedActivity.status.isCompleted &&
+              !enrichedActivity.isExpired) {
+            enrichedActivities.add(enrichedActivity);
+          } else {
+            debugPrint(
+              '  跳过活动: ${activity.name} '
+              '(状态=${enrichedActivity.status.displayName}, '
+              '已过期=${enrichedActivity.isExpired})',
+            );
+          }
+        } else {
+          // 没有 activeId 的活动，无法获取状态，保留显示
+          enrichedActivities.add(activity);
+        }
+      }
+
+      // 如果过滤后没有活动了，返回 null
+      if (enrichedActivities.isEmpty) {
+        debugPrint('课程 ${course['name']} 的所有活动都已完成或过期');
+        return null;
+      }
+
+      debugPrint('发现活动: ${course['name']} - ${enrichedActivities.length} 个');
+      for (final act in enrichedActivities) {
+        debugPrint(
+          '  - [${act.type.displayName}] ${act.name} '
+          '(${act.status.displayName}, ${act.remainingTimeText})',
+        );
+      }
+
+      return XxtCourseActivities(
+        courseName: course['name'] ?? '未知课程',
+        courseId: courseId ?? '',
+        classId: classId ?? '',
+        activities: enrichedActivities,
+      );
+    } catch (e) {
+      debugPrint('检查课程活动失败: ${course['name']}, $e');
+      return null;
+    }
+  }
+
+  /// 获取进行中的活动（使用账号管理器中的学习通账号）
+  /// [forceRefresh] 是否强制刷新（忽略缓存）
+  Future<XxtActivityResult> getOngoingActivities({
+    bool forceRefresh = false,
+  }) async {
+    // 获取当前活跃账号的学习通配置
+    final accountManager = AccountManager();
+
+    // 确保账号管理器已初始化
+    if (!accountManager.isInitialized) {
+      await accountManager.init();
+    }
+
+    final activeAccount = accountManager.activeAccount;
+
+    if (activeAccount == null) {
+      return XxtActivityResult.failure('请先登录教务系统账号', needLogin: true);
+    }
+
+    if (!activeAccount.hasXuexitong) {
+      return XxtActivityResult.failure('请先配置学习通账号', needLogin: true);
+    }
+
+    // 尝试从缓存加载（如果不是强制刷新）
+    if (!forceRefresh) {
+      final (cacheData, isValid) = await AuthStorage.getActivitiesCache();
+      if (cacheData != null && isValid) {
+        try {
+          final activities = _parseActivitiesFromCache(cacheData);
+          debugPrint('从缓存加载活动列表: ${activities.length} 门课程');
+          return XxtActivityResult.success(activities);
+        } catch (e) {
+          debugPrint('解析活动缓存失败: $e');
+        }
+      }
+    }
+
+    // 从网络获取
+    final result = await getOngoingActivitiesWithCredentials(
+      activeAccount.xuexitong!.username,
+      activeAccount.xuexitong!.password,
+    );
+
+    // 如果成功，保存到缓存
+    if (result.success) {
+      try {
+        final cacheData = _serializeActivitiesToCache(result.courseActivities);
+        await AuthStorage.saveActivitiesCache(cacheData);
+        debugPrint('活动列表已缓存: ${result.totalActivityCount} 项');
+      } catch (e) {
+        debugPrint('保存活动缓存失败: $e');
+      }
+    }
+
+    return result;
+  }
+
+  /// 使用指定的账号密码获取进行中活动
+  Future<XxtActivityResult> getOngoingActivitiesWithCredentials(
+    String username,
+    String password,
+  ) async {
+    try {
+      // 确保已登录
+      if (_cookie == null || _cookie!.isEmpty) {
+        debugPrint('活动获取: Cookie 为空，尝试登录');
+        final loginSuccess = await login(username, password);
+        if (!loginSuccess) {
+          return XxtActivityResult.failure('学习通登录失败，请检查账号密码', needLogin: true);
+        }
+      }
+
+      // 获取课程列表
+      var courses = await _getCourseList();
+      debugPrint('活动获取: 首次获取课程 ${courses.length} 门');
+
+      if (courses.isEmpty) {
+        // 可能 Cookie 过期，尝试重新登录
+        debugPrint('活动获取: 课程列表为空，尝试重新登录');
+        final loginSuccess = await login(username, password);
+        if (!loginSuccess) {
+          return XxtActivityResult.failure('学习通登录失败', needLogin: true);
+        }
+
+        courses = await _getCourseList();
+        debugPrint('活动获取: 重新登录后获取课程 ${courses.length} 门');
+        if (courses.isEmpty) {
+          return XxtActivityResult.failure('获取课程列表失败，请稍后重试');
+        }
+      }
+
+      // 并发检查所有课程的活动
+      final results = <XxtCourseActivities>[];
+
+      // 使用 Future.wait 并发请求，但限制并发数
+      const batchSize = 10;
+      for (var i = 0; i < courses.length; i += batchSize) {
+        final batch = courses.skip(i).take(batchSize).toList();
+        final batchResults = await Future.wait(
+          batch.map((c) => _checkCourseActivities(c)),
+        );
+
+        for (final result in batchResults) {
+          if (result != null) {
+            results.add(result);
+          }
+        }
+      }
+
+      debugPrint('活动获取: 共发现 ${results.length} 门课程有活动');
+      return XxtActivityResult.success(results);
+    } catch (e, stackTrace) {
+      debugPrint('获取进行中活动异常: $e');
+      debugPrint('堆栈: $stackTrace');
+      return XxtActivityResult.failure('获取失败: $e');
+    }
+  }
+
+  /// 将活动列表序列化为缓存字符串
+  String _serializeActivitiesToCache(List<XxtCourseActivities> activities) {
+    final list = activities.map((c) => c.toJson()).toList();
+    return jsonEncode(list);
+  }
+
+  /// 从缓存字符串解析活动列表
+  List<XxtCourseActivities> _parseActivitiesFromCache(String cacheData) {
+    final list = jsonDecode(cacheData) as List;
+    return list
+        .map(
+          (item) => XxtCourseActivities.fromJson(item as Map<String, dynamic>),
+        )
+        .toList();
   }
 }
