@@ -10,6 +10,7 @@ import '../services/xxt_service.dart';
 import '../services/widget_service.dart';
 import '../services/notification_service.dart';
 import 'account_manage_screen.dart';
+import 'xxt_sign_screen.dart';
 
 /// 学习页面
 class StudyScreen extends StatefulWidget {
@@ -577,7 +578,7 @@ class _StudyScreenState extends State<StudyScreen>
             ...course.activities.map(
               (activity) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: _buildActivityItem(theme, colorScheme, activity),
+                child: _buildActivityItem(theme, colorScheme, activity, course),
               ),
             ),
           ],
@@ -590,6 +591,7 @@ class _StudyScreenState extends State<StudyScreen>
     ThemeData theme,
     ColorScheme colorScheme,
     XxtActivity activity,
+    XxtCourseActivities course,
   ) {
     final isSignIn = activity.type == XxtActivityType.signIn;
     final isUrgent = activity.isUrgent;
@@ -598,7 +600,7 @@ class _StudyScreenState extends State<StudyScreen>
 
     // 使用更柔和的颜色方案
     Color bgColor;
-    Color? borderColor;
+    Color borderColor;
     Color iconBgColor;
     Color iconColor;
     Color mainColor;
@@ -638,96 +640,132 @@ class _StudyScreenState extends State<StudyScreen>
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor ?? Colors.transparent, width: 1),
+        border: Border.all(color: borderColor, width: 1),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 活动类型图标
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              isCompleted
-                  ? Icons.check_rounded
-                  : _getActivityIcon(activity.type),
-              size: 20,
-              color: iconColor,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // 活动信息
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  activity.name,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: isCompleted
-                        ? colorScheme.onSurfaceVariant.withValues(alpha: 0.7)
-                        : colorScheme.onSurface,
-                    decoration: isCompleted ? TextDecoration.lineThrough : null,
-                    decorationColor: colorScheme.onSurfaceVariant.withValues(
-                      alpha: 0.5,
-                    ),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              // 活动类型图标
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(height: 6),
-                Row(
+                child: Icon(
+                  isCompleted
+                      ? Icons.check_rounded
+                      : _getActivityIcon(activity.type),
+                  size: 20,
+                  color: iconColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 活动信息
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 活动类型标签
-                    _buildActivityTag(
-                      activity.type.displayName,
-                      mainColor,
-                      theme,
-                    ),
-                    // 状态标签
-                    if (isPending || isCompleted) ...[
-                      const SizedBox(width: 6),
-                      _buildActivityTag(
-                        isCompleted ? '已完成' : '待完成',
-                        isCompleted
-                            ? const Color(0xFF4CAF50)
-                            : const Color(0xFFFF9800),
-                        theme,
-                      ),
-                    ],
-                    const Spacer(),
-                    // 时间信息
-                    Icon(
-                      Icons.schedule_rounded,
-                      size: 13,
-                      color: isUrgent
-                          ? mainColor
-                          : colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                    ),
-                    const SizedBox(width: 4),
                     Text(
-                      activity.remainingTimeText,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: isUrgent
-                            ? mainColor
-                            : colorScheme.onSurfaceVariant.withValues(
-                                alpha: 0.8,
-                              ),
-                        fontWeight: isUrgent
-                            ? FontWeight.w600
-                            : FontWeight.w500,
-                        fontSize: 11,
+                      activity.name,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: isCompleted
+                            ? colorScheme.onSurfaceVariant.withValues(
+                                alpha: 0.7,
+                              )
+                            : colorScheme.onSurface,
+                        decoration: isCompleted
+                            ? TextDecoration.lineThrough
+                            : null,
+                        decorationColor: colorScheme.onSurfaceVariant
+                            .withValues(alpha: 0.5),
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        // 活动类型标签
+                        _buildActivityTag(
+                          activity.type.displayName,
+                          mainColor,
+                          theme,
+                        ),
+                        // 状态标签
+                        if (isPending || isCompleted) ...[
+                          const SizedBox(width: 6),
+                          _buildActivityTag(
+                            isCompleted ? '已完成' : '待完成',
+                            isCompleted
+                                ? const Color(0xFF4CAF50)
+                                : const Color(0xFFFF9800),
+                            theme,
+                          ),
+                        ],
+                        const Spacer(),
+                        // 时间信息
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 13,
+                          color: isUrgent
+                              ? mainColor
+                              : colorScheme.onSurfaceVariant.withValues(
+                                  alpha: 0.7,
+                                ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          activity.remainingTimeText,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: isUrgent
+                                ? mainColor
+                                : colorScheme.onSurfaceVariant.withValues(
+                                    alpha: 0.8,
+                                  ),
+                            fontWeight: isUrgent
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+          // 签到按钮（仅对签到类型活动且未完成时显示）
+          if (isSignIn && !isCompleted) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonal(
+                onPressed: () => _navigateToSign(activity, course),
+                style: FilledButton.styleFrom(
+                  backgroundColor: mainColor.withValues(alpha: 0.15),
+                  foregroundColor: mainColor,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.edit_location_alt_rounded, size: 18),
+                    SizedBox(width: 6),
+                    Text('立即签到', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -768,6 +806,25 @@ class _StudyScreenState extends State<StudyScreen>
         return Icons.videocam_rounded;
       case XxtActivityType.other:
         return Icons.assignment_rounded;
+    }
+  }
+
+  /// 跳转到签到页面
+  Future<void> _navigateToSign(
+    XxtActivity activity,
+    XxtCourseActivities course,
+  ) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            XxtSignScreen(activity: activity, courseActivity: course),
+      ),
+    );
+
+    // 如果签到成功，刷新活动列表
+    if (result != null && mounted) {
+      _loadActivities(forceRefresh: true);
     }
   }
 

@@ -119,11 +119,17 @@ class XxtActivity {
   /// 活动类型编号（2=签到, 35=分组任务, 42=随堂练习）
   final String? activeType;
 
+  /// 开始时间
+  final DateTime? startTime;
+
   /// 结束时间（如果有）
   final DateTime? endTime;
 
   /// 活动状态
   final XxtActivityStatus status;
+
+  /// 签到子类型（仅签到活动）：0=拍照, 2=二维码, 3=手势, 4=位置, 5=密码
+  final String? otherId;
 
   const XxtActivity({
     required this.type,
@@ -131,8 +137,10 @@ class XxtActivity {
     required this.rawType,
     this.activeId,
     this.activeType,
+    this.startTime,
     this.endTime,
     this.status = XxtActivityStatus.unknown,
+    this.otherId,
   });
 
   /// 从解析的数据创建
@@ -141,8 +149,10 @@ class XxtActivity {
     required String name,
     String? activeId,
     String? activeType,
+    DateTime? startTime,
     DateTime? endTime,
     XxtActivityStatus status = XxtActivityStatus.unknown,
+    String? otherId,
   }) {
     return XxtActivity(
       type: _parseActivityType(typeName),
@@ -150,8 +160,89 @@ class XxtActivity {
       rawType: typeName.trim(),
       activeId: activeId,
       activeType: activeType,
+      startTime: startTime,
       endTime: endTime,
       status: status,
+      otherId: otherId,
+    );
+  }
+
+  /// 从 API JSON 创建（活动列表 API）
+  factory XxtActivity.fromApiJson(Map<String, dynamic> json) {
+    final type = json['type'] as int?;
+    final otherId = json['otherId']?.toString();
+    final activityStatus = json['status'] as int?;
+
+    // 解析活动类型
+    XxtActivityType activityType;
+    String rawType;
+    switch (type) {
+      case 2:
+      case 74:
+        activityType = XxtActivityType.signIn;
+        rawType = '签到';
+        break;
+      case 42:
+        activityType = XxtActivityType.quiz;
+        rawType = '随堂练习';
+        break;
+      case 35:
+        activityType = XxtActivityType.groupTask;
+        rawType = '分组任务';
+        break;
+      case 4:
+        activityType = XxtActivityType.discussion;
+        rawType = '讨论';
+        break;
+      case 23:
+        activityType = XxtActivityType.vote;
+        rawType = '投票';
+        break;
+      case 14:
+        activityType = XxtActivityType.live;
+        rawType = '直播';
+        break;
+      default:
+        activityType = XxtActivityType.other;
+        rawType = '其他';
+    }
+
+    // 解析用户状态
+    // 注意：活动列表 API 无法直接获取是否已完成的状态
+    // isLook 只表示是否已查看，不是是否已签到
+    // 真正的签到状态需要调用 preSign API 检查
+    // 这里统一设为 pending，用户点击签到时再检查实际状态
+    XxtActivityStatus status;
+    if (activityStatus == 2) {
+      // 活动已结束
+      status = XxtActivityStatus.completed;
+    } else {
+      // 进行中的活动显示为待处理
+      status = XxtActivityStatus.pending;
+    }
+
+    // 解析时间
+    DateTime? startTime;
+    DateTime? endTime;
+    final startTimeMs = json['startTime'];
+    final endTimeMs = json['endTime'];
+    if (startTimeMs is int && startTimeMs > 0) {
+      startTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
+    }
+    if (endTimeMs is int && endTimeMs > 0) {
+      endTime = DateTime.fromMillisecondsSinceEpoch(endTimeMs);
+    }
+
+    return XxtActivity(
+      type: activityType,
+      name: json['nameOne']?.toString() ?? '未知活动',
+      rawType: rawType,
+      activeId: json['id']?.toString(),
+      activeType: type?.toString(),
+      startTime: startTime,
+      endTime: endTime,
+      status: status,
+      otherId: otherId,
     );
   }
 
@@ -162,8 +253,10 @@ class XxtActivity {
     String? rawType,
     String? activeId,
     String? activeType,
+    DateTime? startTime,
     DateTime? endTime,
     XxtActivityStatus? status,
+    String? otherId,
   }) {
     return XxtActivity(
       type: type ?? this.type,
@@ -171,8 +264,10 @@ class XxtActivity {
       rawType: rawType ?? this.rawType,
       activeId: activeId ?? this.activeId,
       activeType: activeType ?? this.activeType,
+      startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       status: status ?? this.status,
+      otherId: otherId ?? this.otherId,
     );
   }
 
@@ -248,7 +343,9 @@ class XxtActivity {
       'rawType': rawType,
       'activeId': activeId,
       'activeType': activeType,
+      'startTime': startTime?.toIso8601String(),
       'endTime': endTime?.toIso8601String(),
+      'otherId': otherId,
       'status': status.index,
     };
   }
@@ -261,9 +358,13 @@ class XxtActivity {
       rawType: json['rawType'] as String,
       activeId: json['activeId'] as String?,
       activeType: json['activeType'] as String?,
+      startTime: json['startTime'] != null
+          ? DateTime.tryParse(json['startTime'] as String)
+          : null,
       endTime: json['endTime'] != null
           ? DateTime.tryParse(json['endTime'] as String)
           : null,
+      otherId: json['otherId'] as String?,
       status: json['status'] != null
           ? XxtActivityStatus.values[json['status'] as int]
           : XxtActivityStatus.unknown,

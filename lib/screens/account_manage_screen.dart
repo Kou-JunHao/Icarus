@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../models/account.dart';
 import '../services/account_manager.dart';
+import 'xxt_sign_accounts_screen.dart';
 
 /// 账号管理页面
 class AccountManageScreen extends StatefulWidget {
@@ -140,7 +141,7 @@ class _AccountManageScreenState extends State<AccountManageScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      '支持添加多个教务系统账号，可选配置学习通账号。切换账号后需要重新登录。',
+                      '支持添加多个教务系统账号，可选配置学习通账号。切换账号后需要重新加载。',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onPrimaryContainer,
                       ),
@@ -148,6 +149,38 @@ class _AccountManageScreenState extends State<AccountManageScreen> {
                   ),
                 ],
               ),
+            ),
+          ),
+
+          // 签到账号管理入口
+          const SizedBox(height: 16),
+          Card(
+            elevation: 0,
+            color: colorScheme.tertiaryContainer.withValues(alpha: 0.3),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ListTile(
+              leading: Icon(
+                Icons.people_outline_rounded,
+                color: colorScheme.tertiary,
+              ),
+              title: const Text('签到账号管理'),
+              subtitle: Text(
+                '管理用于分享签到的学习通账号',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const XxtSignAccountsScreen(),
+                  ),
+                );
+              },
             ),
           ),
         ],
